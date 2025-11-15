@@ -2,3 +2,4 @@ websocket-client
 python-dotenv
 sounddevice
 numpy
+requests
