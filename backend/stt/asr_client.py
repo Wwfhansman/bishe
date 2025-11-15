@@ -166,6 +166,41 @@ class ASRClient:
         th.start()
         return th
 
+    def start_receiving_objects(self, on_obj):
+        self.receiving = True
+        def loop():
+            while self.receiving:
+                try:
+                    msg = self.ws.recv()
+                except Exception:
+                    continue
+                if isinstance(msg, bytes):
+                    if len(msg) < 8:
+                        continue
+                    hb = msg[:4]
+                    hs = (hb[0] & 0x0F) * 4
+                    rem = msg[hs:]
+                    if len(rem) < 8:
+                        continue
+                    mt = (hb[1] >> 4) & 0x0F
+                    ps_off = 4 if mt == 0b1001 else 0
+                    ps = struct.unpack(">I", rem[ps_off:ps_off+4])[0]
+                    payload = rem[ps_off+4:ps_off+4+ps]
+                    try:
+                        obj = json.loads(payload.decode("utf-8"))
+                    except Exception:
+                        continue
+                    on_obj(obj)
+                else:
+                    try:
+                        obj = json.loads(msg)
+                        on_obj(obj)
+                    except Exception:
+                        pass
+        th = threading.Thread(target=loop, daemon=True)
+        th.start()
+        return th
+
     def stream_audio(self, chunks_iter):
         idx = 1
         for chunk in chunks_iter:
