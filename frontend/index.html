@@ -1,0 +1,188 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Voice Interaction Test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 20px; }
+    button { padding: 8px 12px; margin-right: 10px; }
+    #status { margin-top: 10px; color: #444; }
+  </style>
+</head>
+<body>
+  <h3>语音交互测试</h3>
+  <button id="startBtn">开始监听</button>
+  <button id="stopBtn" disabled>停止监听</button>
+  <div id="status">未连接</div>
+  <button id="probeBtn">探测TTS</button>
+  <pre id="log" style="max-height:240px;overflow:auto;background:#f5f5f5;padding:8px;border:1px solid #ddd"></pre>
+  <script>
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusEl = document.getElementById('status');
+
+    let ws = null;
+    let audioCtx = null;
+    let processor = null;
+    let micStream = null;
+    let inputSampleRate = 48000;
+    let chunkMs = 200;
+    let ttsSampleRate = 24000;
+    function log(msg) { const el = document.getElementById('log'); el.textContent += (typeof msg === 'string' ? msg : JSON.stringify(msg)) + "\n"; el.scrollTop = el.scrollHeight; }
+
+    const pcmPlayer = (() => {
+      let ctx = null;
+      let node = null;
+      let buffer = new Float32Array(0);
+      let outRate = 48000;
+      function init() {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        outRate = ctx.sampleRate;
+        node = ctx.createScriptProcessor(4096, 1, 1);
+        node.onaudioprocess = (e) => {
+          const out = e.outputBuffer.getChannelData(0);
+          const need = out.length;
+          if (buffer.length >= need) {
+            out.set(buffer.subarray(0, need));
+            buffer = buffer.subarray(need);
+          } else {
+            out.fill(0);
+          }
+        };
+        node.connect(ctx.destination);
+      }
+      function pushPCM16(chunk, inRate=16000) {
+        // convert int16 to float
+        const int16 = new Int16Array(chunk.buffer, chunk.byteOffset, Math.floor(chunk.byteLength/2));
+        const f = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i++) f[i] = int16[i] / 32768;
+        // resample to ctx sampleRate
+        const ratio = outRate / inRate;
+        const outLen = Math.floor(f.length * ratio);
+        const out = new Float32Array(outLen);
+        for (let i = 0; i < outLen; i++) {
+          const srcPos = i / ratio;
+          const idx = Math.floor(srcPos);
+          const frac = srcPos - idx;
+          const s0 = f[idx] || 0;
+          const s1 = f[idx+1] || s0;
+          out[i] = s0 + (s1 - s0) * frac;
+        }
+        const merged = new Float32Array(buffer.length + out.length);
+        merged.set(buffer, 0);
+        merged.set(out, buffer.length);
+        buffer = merged;
+      }
+      return { init, pushPCM16 };
+    })();
+
+    async function start() {
+      if (ws) return;
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+      } catch (e) {
+        statusEl.textContent = '麦克风权限被拒绝或不可用';
+        return;
+      }
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      inputSampleRate = audioCtx.sampleRate;
+      const source = audioCtx.createMediaStreamSource(micStream);
+      processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      let acc = [];
+      let accSamples = 0;
+      const targetSamples = Math.floor(16000 * chunkMs / 1000);
+      processor.onaudioprocess = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const input = e.inputBuffer.getChannelData(0);
+        const ratio = 16000 / inputSampleRate;
+        const outLen = Math.floor(input.length * ratio);
+        const out = new Float32Array(outLen);
+        for (let i = 0; i < outLen; i++) {
+          const srcPos = i / ratio;
+          const idx = Math.floor(srcPos);
+          const frac = srcPos - idx;
+          const s0 = input[idx] || 0;
+          const s1 = input[idx+1] || s0;
+          out[i] = s0 + (s1 - s0) * frac;
+        }
+        acc.push(out);
+        accSamples += out.length;
+        if (accSamples >= targetSamples) {
+          const merged = new Float32Array(accSamples);
+          let off = 0;
+          for (const a of acc) { merged.set(a, off); off += a.length; }
+          acc = []; accSamples = 0;
+          const int16 = new Int16Array(merged.length);
+          for (let i = 0; i < merged.length; i++) {
+            let s = Math.max(-1, Math.min(1, merged[i]));
+            int16[i] = s < 0 ? s * 32768 : s * 32767;
+          }
+          log({event:'audio_chunk_sent', samples:int16.length}); ws.send(new Uint8Array(int16.buffer));
+        }
+      };
+      source.connect(processor);
+      processor.connect(audioCtx.destination);
+      if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (_) {} }
+      const origin = (window.location.origin && window.location.origin.startsWith('http')) ? window.location.origin : 'http://localhost:8000';
+      const url = new URL('/ws/voice', origin);
+      url.protocol = (url.protocol === 'https:') ? 'wss:' : 'ws:';
+      ws = new WebSocket(url.href);
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => { statusEl.textContent = '已连接，开始推流'; log({event:'ws_open'}); };
+      // 发送初始化心跳，避免某些容器立即断开空闲连接
+      ws.addEventListener('open', () => {
+        try { ws.send(JSON.stringify({ cmd: 'init' })); } catch (_) {}
+      });
+      ws.onclose = () => { statusEl.textContent = '连接关闭'; };
+      ws.onerror = () => { statusEl.textContent = '连接错误'; log({event:'ws_error'}); };
+      ws.onmessage = (ev) => {
+        if (typeof ev.data === 'string') {
+          try {
+            const o = JSON.parse(ev.data);
+            if (o && o.event === 'tts_start' && typeof o.rate === 'number') {
+              ttsSampleRate = o.rate;
+            }
+            log(o);
+          } catch (_) {
+            log(ev.data);
+          }
+        } else {
+          const arr = new Uint8Array(ev.data);
+          pcmPlayer.pushPCM16(arr, ttsSampleRate);
+        }
+      };
+      pcmPlayer.init();
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    }
+
+    function stop() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ cmd: 'stop' }));
+      }
+      if (processor) { processor.disconnect(); processor = null; }
+      if (audioCtx) { audioCtx.close(); audioCtx = null; }
+      if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+      if (ws) { ws.close(); ws = null; }
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      statusEl.textContent = '未连接';
+    }
+
+    startBtn.onclick = start;
+    stopBtn.onclick = stop;
+    document.getElementById('probeBtn').onclick = async () => {
+      const origin = (window.location.origin && window.location.origin.startsWith('http')) ? window.location.origin : 'http://localhost:8000';
+      const url = new URL('/api/tts_probe', origin);
+      try {
+        const r = await fetch(url.href);
+        const j = await r.json();
+        log(j);
+      } catch (e) {
+        log({event:'probe_error', detail:String(e)});
+      }
+    };
+  </script>
+</body>
+</html>

@@ -2,7 +2,7 @@ import json
 import struct
 import threading
 import websocket
-from ..config import APP_ID, ACCESS_TOKEN, RESOURCE_ID, ENDPOINT, CONNECT_ID, FORMAT, CODEC, RATE, BITS, CHANNELS, LANGUAGE
+from ..config import APP_ID, ACCESS_TOKEN, RESOURCE_ID, ENDPOINT, CONNECT_ID, FORMAT, CODEC, RATE, BITS, CHANNELS, LANGUAGE, ASR_END_WINDOW_SIZE, ASR_FORCE_TO_SPEECH_TIME
 
 class ASRClient:
     def __init__(self):
@@ -52,8 +52,8 @@ class ASRClient:
                 "enable_punc": True,
                 "result_type": "single",
                 "show_utterances": True,
-                "end_window_size": 800,
-                "force_to_speech_time": 1000,
+                "end_window_size": ASR_END_WINDOW_SIZE,
+                "force_to_speech_time": ASR_FORCE_TO_SPEECH_TIME,
             },
         }
         payload = json.dumps(p, ensure_ascii=False).encode("utf-8")
@@ -207,6 +207,14 @@ class ASRClient:
             h = self._build_header(header_size_units=1, msg_type=2, flags=0, serialization=0, compression=0)
             self._send_packet(h, chunk, seq=None)
             idx += 1
+        h = self._build_header(header_size_units=1, msg_type=2, flags=2, serialization=0, compression=0)
+        self._send_packet(h, b"", seq=None)
+
+    def send_audio_chunk(self, chunk: bytes):
+        h = self._build_header(header_size_units=1, msg_type=2, flags=0, serialization=0, compression=0)
+        self._send_packet(h, chunk, seq=None)
+
+    def finish_stream(self):
         h = self._build_header(header_size_units=1, msg_type=2, flags=2, serialization=0, compression=0)
         self._send_packet(h, b"", seq=None)
 

@@ -3,123 +3,729 @@ APP ID：4679009481
 Access Token：g3YmeBGmPl-eL2XbgikFP3mzej4yPQGs
 Voice_type：zh_female_wanwanxiaohe_moon_bigtts
 
-<span id="60c34d72"></span>
-# Websocket
-> 使用账号申请部分申请到的 appid&access_token 进行调用
-> 文本一次性送入，后端边合成边返回音频数据
+<span id="70413752"></span>
+# 1 接口功能
+单向流式API为用户提供文本转语音的能力，支持多语种、多方言，同时支持websocket协议流式输出。
+<span id="7b9267e4"></span>
+## 1.1 最佳实践
+推荐使用链接复用，可降低耗时约70ms左右。
+对比v1单向流式接口，不同的音色优化程度不同，以具体测试结果为准，理论上相对会有几十ms的提升。
+<span id="cbd635a6"></span>
+# 2 接口说明
+<span id="ebc43a76"></span>
+## 2.1 请求Request
+<span id="879dd657"></span>
+### 请求路径
+`wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream`
+<span id="b4537ed1"></span>
+### 建连&鉴权
+<span id="7d2a2880"></span>
+#### Request Headers
 
-<span id="9e6b61a2"></span>
-## 1. 接口说明
-> V1: 
-> **wss://openspeech.bytedance.com/api/v1/tts/ws_binary                            (V1 单向流式)**
-> **https://openspeech.bytedance.com/api/v1/tts                                                (V1 http非流式)**
-> V3: 
-> **wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream    (V3 wss单向流式)**
-> [V3 websocket单向流式文档](https://www.volcengine.com/docs/6561/1719100)
-> **wss://openspeech.bytedance.com/api/v3/tts/bidirection                          (V3 wss双向流式)**
-> [V3 websocket双向流式文档](https://www.volcengine.com/docs/6561/1329505)
-> **https://openspeech.bytedance.com/api/v3/tts/unidirectional                 (V3 http单向流式)**
-> [V3 http单向流式文档](https://www.volcengine.com/docs/6561/1598757)
+| | | | | \
+|Key |说明 |是否必须 |Value示例 |
+|---|---|---|---|
+| | | | | \
+|X-Api-App-Id |\
+| |使用火山引擎控制台获取的APP ID，可参考 [控制台使用FAQ-Q1](https://www.volcengine.com/docs/6561/196768#q1%EF%BC%9A%E5%93%AA%E9%87%8C%E5%8F%AF%E4%BB%A5%E8%8E%B7%E5%8F%96%E5%88%B0%E4%BB%A5%E4%B8%8B%E5%8F%82%E6%95%B0appid%EF%BC%8Ccluster%EF%BC%8Ctoken%EF%BC%8Cauthorization-type%EF%BC%8Csecret-key-%EF%BC%9F) |是 |\
+| | | |your-app-id |\
+| | | | |
+| | | | | \
+|X-Api-Access-Key |\
+| |使用火山引擎控制台获取的Access Token，可参考 [控制台使用FAQ-Q1](https://www.volcengine.com/docs/6561/196768#q1%EF%BC%9A%E5%93%AA%E9%87%8C%E5%8F%AF%E4%BB%A5%E8%8E%B7%E5%8F%96%E5%88%B0%E4%BB%A5%E4%B8%8B%E5%8F%82%E6%95%B0appid%EF%BC%8Ccluster%EF%BC%8Ctoken%EF%BC%8Cauthorization-type%EF%BC%8Csecret-key-%EF%BC%9F) |是 |\
+| | | |your-access-key |\
+| | | | |
+| | | | | \
+|X-Api-Resource-Id |\
+| |表示调用服务的资源信息 ID |\
+| | |\
+| |* 豆包语音合成模型1.0： |\
+| |   * seed-tts-1.0 或者 volc.service_type.10029（字符版） |\
+| |   * seed-tts-1.0-concurr 或者 volc.service_type.10048（并发版） |\
+| |* 豆包语音合成模型2.0:   |\
+| |   * seed-tts-2.0 (字符版) |\
+| |* 声音复刻： |\
+| |   * seed-icl-1.0（声音复刻1.0字符版） |\
+| |   * seed-icl-1.0-concurr（声音复刻1.0并发版） |\
+| |   * seed-icl-2.0 (声音复刻2.0字符版) |\
+| | |\
+| |**注意：** |\
+| | |\
+| |* "豆包语音合成模型1.0"的资源信息ID仅适用于["豆包语音合成模型1.0"的音色](https://www.volcengine.com/docs/6561/1257544) |\
+| |* "豆包语音合成模型2.0"的资源信息ID仅适用于["豆包语音合成模型2.0"的音色](https://www.volcengine.com/docs/6561/1257544) |是 |\
+| | | |* 豆包语音合成模型1.0： |\
+| | | |   * seed-tts-1.0  |\
+| | | |   * seed-tts-1.0-concurr |\
+| | | |* 豆包语音合成模型2.0:   |\
+| | | |   * seed-tts-2.0  |\
+| | | |* 声音复刻： |\
+| | | |   * seed-icl-1.0（声音复刻1.0字符版） |\
+| | | |   * seed-icl-1.0-concurr（声音复刻1.0并发版） |\
+| | | |   * seed-icl-2.0 (声音复刻2.0字符版) |
+| | | | | \
+|X-Api-Request-Id |标识客户端请求ID，uuid随机字符串 |否 |67ee89ba-7050-4c04-a3d7-ac61a63499b3 |
+| | | | | \
+|X-Control-Require-Usage-Tokens-Return |请求消耗的用量返回控制标记。当携带此字段，在SessionFinish事件（152）中会携带用量数据 |否 |* 设置为*，表示返回已支持的用量数据。 |\
+| | | |* 也设置为具体的用量数据标记，如text_words；多个用逗号分隔 |\
+| | | |* 当前已支持的用量数据 |\
+| | | |   * text_words，表示计费字符数 |
 
-:::warning
-大模型音色都推荐接入V3接口，时延上的表现会更好
-:::
-<span id="34dcdf3a"></span>
-## 2. 身份认证
-认证方式使用 Bearer Token，在请求的    header 中加上`"Authorization": "Bearer; {token}"`，并在请求的 json 中填入对应的 appid。
-:::warning
-Bearer 和 token 使用分号 ; 分隔，替换时请勿保留{}
-:::
-AppID/Token/Cluster 等信息可参考 [控制台使用FAQ-Q1](/docs/6561/196768#q1：哪里可以获取到以下参数appid，cluster，token，authorization-type，secret-key-？)
-<span id="f1d92aff"></span>
-## 3. 请求方式
-<span id="14624bd9"></span>
-### 3.1 二进制协议
-<span id="7574a509"></span>
-#### 报文格式(Message format)
-![Image](https://lf3-volc-editor.volccdn.com/obj/volcfe/sop-public/upload_cc1c1cdd61bf29f5bde066dc693dcb2b.png =1816x)
-所有字段以 [Big Endian(大端序)](https://zh.wikipedia.org/wiki/%E5%AD%97%E8%8A%82%E5%BA%8F#%E5%A4%A7%E7%AB%AF%E5%BA%8F) 的方式存储。
-**字段描述**
+<span id="9b6ef23d"></span>
+#### Response Headers
 
 | | | | \
-|字段 Field （大小， 单位 bit) |描述 Description |值 Values |
+|Key |说明 |Value示例 |
 |---|---|---|
 | | | | \
-|协议版本(Protocol version) (4) |可能会在将来使用不同的协议版本，所以这个字段是为了让客户端和服务器在版本上保持一致。 |`0b0001` - 版本 1 （目前只有版本 1) |
+|X-Tt-Logid |服务端返回的 logid，建议用户获取和打印方便定位问题 |2025041513355271DF5CF1A0AE0508E78C |
+
+<span id="1ed7c9ef"></span>
+### WebSocket 二进制协议
+WebSocket 使用二进制协议传输数据。
+协议的组成由至少 4 个字节的可变 header、payload size 和 payload 三部分组成，其中
+
+* header 描述消息类型、序列化方式以及压缩格式等信息；
+* payload size 是 payload 的长度；
+* payload 是具体负载内容，依据消息类型不同 payload 内容不同；
+
+需注意：协议中整数类型的字段都使用**大端**表示。
+<span id="10007f84"></span>
+##### 二进制帧
+
+| | | | | \
+|Byte |Left 4-bit |Right 4-bit |说明 |
+|---|---|---|---|
+| | | | | \
+|0 - Left half |Protocol version | |目前只有v1，始终填0b0001 |
+| | | | | \
+|0 - Right half | |Header size (4x) |目前只有4字节，始终填0b0001 |
+| | | | | \
+|1 - Left half |Message type | |固定为0b001 |
+| | | | | \
+|1 - Right half | |Message type specific flags |在sendText时，为0 |\
+| | | |在finishConnection时，为0b100 |
+| | | | | \
+|2 - Left half |Serialization method | |0b0000：Raw（无特殊序列化方式，主要针对二进制音频数据）0b0001：JSON（主要针对文本类型消息） |
+| | | | | \
+|2 - Right half | |Compression method |0b0000：无压缩0b0001：gzip |
+| | || | \
+|3 |Reserved | |留空（0b0000 0000） |
+| | || | \
+|[4 ~ 7] |[Optional field,like event number,...] | |取决于Message type specific flags，可能有、也可能没有 |
+| | || | \
+|... |Payload | |可能是音频数据、文本数据、音频文本混合数据 |
+
+<span id="e09e1c0e"></span>
+###### payload请求参数
+
+| | | | | | \
+|字段 |描述 |是否必须 |类型 |默认值 |
+|---|---|---|---|---|
+| | | | | | \
+|user |用户信息 | | | |
+| | | | | | \
+|user.uid |用户uid | | | |
+| | | | | | \
+|event |请求的事件 | | | |
+| | | | | | \
+|namespace |请求方法 | |string |BidirectionalTTS |
+| | | | | | \
+|req_params.text |输入文本 | |string | |
+| | | | | | \
+|req_params.model |\
+| |模型版本，传`seed-tts-1.1`较默认版本音质有提升，并且延时更优，不传为默认效果。 |\
+| |注：若使用1.1模型效果，在复刻场景中会放大训练音频prompt特质，因此对prompt的要求更高，使用高质量的训练音频，可以获得更优的音质效果。 |否 |string |\
+| | | | |—— |
+| | | | | | \
+|req_params.ssml |当文本格式是ssml时，需要将文本赋值为ssml，此时文本处理的优先级高于text。ssml和text字段，至少有一个不为空 | |string | |
+| | | | | | \
+|req_params.speaker |发音人，具体见[发音人列表](https://www.volcengine.com/docs/6561/1257544) |√ |string | |
+| | | | | | \
+|req_params.audio_params |音频参数，便于服务节省音频解码耗时 |√ |object | |
+| | | | | | \
+|req_params.audio_params.format |音频编码格式，mp3/ogg_opus/pcm。<span style="background-color: rgba(255,233,40, 0.96)">接口传入wav并不会报错，在流式场景下传入wav会多次返回wav header，这种场景建议使用pcm。</span> | |string |mp3 |
+| | | | | | \
+|req_params.audio_params.sample_rate |音频采样率，可选值 [8000,16000,22050,24000,32000,44100,48000] | |number |24000 |
+| | | | | | \
+|req_params.audio_params.bit_rate |音频比特率，可传16000、32000等。 |\
+| |bit_rate默认设置范围为64k～160k，传了disable_default_bit_rate为true后可以设置到64k以下 |\
+| |GoLang示例：additions = fmt.Sprintf("{"disable_default_bit_rate":true}") |\
+| |注：bit_rate只针对MP3格式，wav计算比特率跟pcm一样是 比特率 (bps) = 采样率 × 位深度 × 声道数 |\
+| |目前大模型TTS只能改采样率，所以对于wav格式来说只能通过改采样率来变更音频的比特率 | |number | |
+| | | | | | \
+|req_params.audio_params.emotion |设置音色的情感。示例："emotion": "angry" |\
+| |注：当前仅部分音色支持设置情感，且不同音色支持的情感范围存在不同。 |\
+| |详见：[大模型语音合成API-音色列表-多情感音色](https://www.volcengine.com/docs/6561/1257544) | |string | |
+| | | | | | \
+|req_params.audio_params.emotion_scale |调用emotion设置情感参数后可使用emotion_scale进一步设置情绪值，范围1~5，不设置时默认值为4。 |\
+| |注：理论上情绪值越大，情感越明显。但情绪值1~5实际为非线性增长，可能存在超过某个值后，情绪增加不明显，例如设置3和5时情绪值可能接近。 | |number |4 |
+| | | | | | \
+|req_params.audio_params.speech_rate |语速，取值范围[-50,100]，100代表2.0倍速，-50代表0.5倍数 | |number |0 |
+| | | | | | \
+|req_params.audio_params.loudness_rate |音量，取值范围[-50,100]，100代表2.0倍音量，-50代表0.5倍音量（mix音色暂不支持） | |number |0 |
+| | | | | | \
+|req_params.audio_params.enable_timestamp |\
+|([仅TTS1.0支持](https://www.volcengine.com/docs/6561/1257544)) |设置 "enable_timestamp": true 返回句级别字的时间戳（默认为 flase，参数传入 true 即表示启用） |\
+| |注意： |\
+| | |\
+| |1. 该字段仅适用于["豆包语音合成模型1.0"的音色](https://www.volcengine.com/docs/6561/1257544) | |bool |false |
+| | | | | | \
+|req_params.additions |用户自定义参数 | |jsonstring | |
+| | | | | | \
+|req_params.additions.silence_duration |设置该参数可在句尾增加静音时长，范围0~30000ms。（注：增加的句尾静音主要针对传入文本最后的句尾，而非每句话的句尾） | |number |0 |
+| | | | | | \
+|req_params.additions.enable_language_detector |自动识别语种 | |bool |false |
+| | | | | | \
+|req_params.additions.disable_markdown_filter |是否开启markdown解析过滤， |\
+| |为true时，解析并过滤markdown语法，例如，`**你好**`，会读为“你好”， |\
+| |为false时，不解析不过滤，例如，`**你好**`，会读为“星星‘你好’星星” | |bool |false |
+| | | | | | \
+|req_params.additions.disable_emoji_filter |开启emoji表情在文本中不过滤显示，默认为false，建议搭配时间戳参数一起使用。 |\
+| |GoLang示例：`additions = fmt.Sprintf("{"disable_emoji_filter":true}")` | |bool |false |
+| | | | | | \
+|req_params.additions.mute_cut_remain_ms |该参数需配合mute_cut_threshold参数一起使用，其中： |\
+| |"mute_cut_threshold": "400", // 静音判断的阈值（音量小于该值时判定为静音） |\
+| |"mute_cut_remain_ms": "50", // 需要保留的静音长度 |\
+| |注：参数和value都为string格式 |\
+| |Golang示例：`additions = fmt.Sprintf("{"mute_cut_threshold":"400", "mute_cut_remain_ms": "1"}")` |\
+| |特别提醒： |\
+| | |\
+| |* 因MP3格式的特殊性，句首始终会存在100ms内的静音无法消除，WAV格式的音频句首静音可全部消除，建议依照自身业务需求综合判断选择 | |string | |
+| | | | | | \
+|req_params.additions.enable_latex_tn |是否可以播报latex公式，需将disable_markdown_filter设为true | |bool |false |
+| | | | | | \
+|req_params.additions.max_length_to_filter_parenthesis |是否过滤括号内的部分，0为不过滤，100为过滤 | |int |100 |
+| | | | | | \
+|req_params.additions.explicit_language（明确语种） |仅读指定语种的文本 |\
+| |**精品音色和 声音复刻 ICL1.0场景：** |\
+| | |\
+| |* 不给定参数，正常中英混 |\
+| |* `crosslingual` 启用多语种前端（包含`zh/en/ja/es-ms/id/pt-br`） |\
+| |* `zh-cn` 中文为主，支持中英混  |\
+| |* `en` 仅英文 |\
+| |* `ja` 仅日文 |\
+| |* `es-mx` 仅墨西 |\
+| |* `id` 仅印尼 |\
+| |* `pt-br` 仅巴葡 |\
+| | |\
+| |**DIT 声音复刻场景：** |\
+| |当音色是使用model_type=2训练的，即采用dit标准版效果时，建议指定明确语种，目前支持： |\
+| | |\
+| |* 不给定参数，启用多语种前端`zh,en,ja,es-mx,id,pt-br,de,fr` |\
+| |* `zh,en,ja,es-mx,id,pt-br,de,fr` 启用多语种前端 |\
+| |* `zh-cn` 中文为主，支持中英混  |\
+| |* `en` 仅英文 |\
+| |* `ja` 仅日文 |\
+| |* `es-mx` 仅墨西 |\
+| |* `id` 仅印尼 |\
+| |* `pt-br` 仅巴葡 |\
+| |* `de` 仅德语 |\
+| |* `fr` 仅法语 |\
+| | |\
+| |当音色是使用model_type=3训练的，即采用dit还原版效果时，必须指定明确语种，目前支持： |\
+| | |\
+| |* 不给定参数，正常中英混 |\
+| |* `zh-cn` 中文为主，支持中英混  |\
+| |* `en` 仅英文 |\
+| | |\
+| |**声音复刻 ICL2.0场景：** |\
+| |当音色是使用model_type=4训练的 |\
+| | |\
+| |* 不给定参数，正常中英混 |\
+| |* `zh-cn` 中文为主，支持中英混  |\
+| |* `en` 仅英文 |\
+| | |\
+| |GoLang示例：`additions = fmt.Sprintf("{"explicit_language": "zh"}")` | |string | |
+| | | | | | \
+|req_params.additions.context_language（参考语种） |给模型提供参考的语种 |\
+| | |\
+| |* 不给定 西欧语种采用英语 |\
+| |* id 西欧语种采用印尼 |\
+| |* es 西欧语种采用墨西 |\
+| |* pt 西欧语种采用巴葡 | |string | |
+| | | | | | \
+|req_params.additions.unsupported_char_ratio_thresh |默认: 0.3，最大值: 1.0 |\
+| |检测出不支持合成的文本超过设置的比例，则会返回错误。 | |float |0.3 |
+| | | | | | \
+|req_params.additions.aigc_watermark |默认：false |\
+| |是否在合成结尾增加音频节奏标识 | |bool |false |
+| | | | | | \
+|req_params.additions.aigc_metadata （meta 水印） |在合成音频 header加入元数据隐式表示，支持 mp3/wav/ogg_opus | |object | |
+| | | | | | \
+|req_params.additions.aigc_metadata.enable |是否启用隐式水印 | |bool |false |
+| | | | | | \
+|req_params.additions.aigc_metadata.content_producer |合成服务提供者的名称或编码 | |string |"" |
+| | | | | | \
+|req_params.additions.aigc_metadata.produce_id |内容制作编号 | |string |"" |
+| | | | | | \
+|req_params.additions.aigc_metadata.content_propagator |内容传播服务提供者的名称或编码 | |string |"" |
+| | | | | | \
+|req_params.additions.aigc_metadata.propagate_id |内容传播编号 | |string |"" |
+| | | | | | \
+|req_params.additions.cache_config（缓存相关参数） |开启缓存，开启后合成相同文本时，服务会直接读取缓存返回上一次合成该文本的音频，可明显加快相同文本的合成速率，缓存数据保留时间1小时。 |\
+| |（通过缓存返回的数据不会附带时间戳） |\
+| |Golang示例：`additions = fmt.Sprintf("{"disable_default_bit_rate":true, "cache_config": {"text_type": 1,"use_cache": true}}")` | |object | |
+| | | | | | \
+|req_params.additions.cache_config.text_type（缓存相关参数） |和use_cache参数一起使用，需要开启缓存时传1 | |int |1 |
+| | | | | | \
+|req_params.additions.cache_config.use_cache（缓存相关参数） |和text_type参数一起使用，需要开启缓存时传true | |bool |true |
+| | | | | | \
+|req_params.additions.post_process |后处理配置 |\
+| |Golang示例：`additions = fmt.Sprintf("{"post_process":{"pitch":12}}")` | |object | |
+| | | | | | \
+|req_params.additions.post_process.pitch |音调取值范围是[-12,12] | |int |\
+| | | | |0 |
+| | | | | | \
+|req_params.additions.context_texts |\
+|([仅TTS2.0支持](https://www.volcengine.com/docs/6561/1257544)) |语音合成的辅助信息，用于模型对话式合成，能更好的体现语音情感； |\
+| |可以探索，比如常见示例有以下几种： |\
+| | |\
+| |1. 语速调整 |\
+| |   1. 比如：context_texts: ["你可以说慢一点吗？"] |\
+| |2. 情绪/语气调整 |\
+| |   1. 比如：context_texts=["你可以用特别特别痛心的语气说话吗?"] |\
+| |   2. 比如：context_texts=["嗯，你的语气再欢乐一点"] |\
+| |3. 音量调整 |\
+| |   1. 比如：context_texts=["你嗓门再小点。"] |\
+| |4. 音感调整 |\
+| |   1. 比如：context_texts=["你能用骄傲的语气来说话吗？"] |\
+| | |\
+| |注意： |\
+| | |\
+| |1. 该字段仅适用于["豆包语音合成模型2.0"的音色](https://www.volcengine.com/docs/6561/1257544) |\
+| |2. 当前字符串列表只第一个值有效 |\
+| |3. 该字段文本不参与计费 | |string list |null |
+| | | | | | \
+|req_params.additions.section_id |\
+|([仅TTS2.0支持](https://www.volcengine.com/docs/6561/1257544)) |其他合成语音的会话id(session_id)，用于辅助当前语音合成，提供更多的上下文信息； |\
+| |取值，参见接口交互中的session_id |\
+| |示例： |\
+| | |\
+| |1. section_id="bf5b5771-31cd-4f7a-b30c-f4ddcbf2f9da" |\
+| | |\
+| |注意： |\
+| | |\
+| |1. 该字段仅适用于["豆包语音合成模型2.0"的音色](https://www.volcengine.com/docs/6561/1257544) |\
+| |2. 历史上下文的session_id 有效期： |\
+| |   1. 最长30轮 |\
+| |   2. 最长10分钟 | |string |"" |
+| | | | | | \
+|req_params.additions.use_tag_parser |是否开启cot解析能力。cot能力可以辅助当前语音合成，对语速、情感等进行调整。 |\
+| |注意： |\
+| | |\
+| |1. 音色支持范围：仅限声音复刻2.0复刻的音色 |\
+| |2. 文本长度：单句的text字符长度最好小于64（cot标签也计算在内） |\
+| |3. cot能力生效的范围是单句 |\
+| | |\
+| |示例： |\
+| |支持单组和多组cot标签：`<cot text=急促难耐>工作占据了生活的绝大部分</cot>，只有去做自己认为伟大的工作，才能获得满足感。<cot text=语速缓慢>不管生活再苦再累，都绝不放弃寻找</cot>。` | |bool |false |
+| | | | | | \
+|req_params.mix_speaker |混音参数结构 |\
+| |注意： |\
+| | |\
+| |1. 该字段仅适用于["豆包语音合成模型1.0"的音色](https://www.volcengine.com/docs/6561/1257544) | |object | |
+| | | | | | \
+|req_params.mix_speaker.speakers |混音音色名以及影响因子列表 |\
+| | |\
+| |1. 最多支持3个音色混音 |\
+| |2. 混音影响因子和必须=1 |\
+| |3. 使用复刻音色时，需要使用查询接口获取的icl_的speakerid，而非S_开头的speakerid |\
+| |4. 音色风格差异较大的两个音色（如男女混），以0.5-0.5同等比例混合时，可能出现偶发跳变，建议尽量避免 |\
+| | |\
+| |注意：使用Mix能力时，req_params.speaker = custom_mix_bigtts | |list |null |
+| | | | | | \
+|req_params.mix_speaker.speakers[i].source_speaker |混音源音色名（支持大小模型音色和复刻2.0音色） | |string |"" |
+| | | | | | \
+|req_params.mix_speaker.speakers[i].mix_factor |混音源音色名影响因子 | |float |0 |
+
+单音色请求参数示例：
+```JSON
+{
+    "user": {
+        "uid": "12345"
+    },
+    "req_params": {
+        "text": "明朝开国皇帝朱元璋也称这本书为,万物之根",
+        "speaker": "zh_female_shuangkuaisisi_moon_bigtts",
+        "audio_params": {
+            "format": "mp3",
+            "sample_rate": 24000
+        },
+      }
+    }
+}
+```
+
+mix请求参数示例：
+```JSON
+{
+    "user": {
+        "uid": "12345"
+    },
+    "req_params": {
+        "text": "明朝开国皇帝朱元璋也称这本书为万物之根",
+        "speaker": "custom_mix_bigtts",
+        "audio_params": {
+            "format": "mp3",
+            "sample_rate": 24000
+        },
+        "mix_speaker": {
+            "speakers": [{
+                "source_speaker": "zh_male_bvlazysheep",
+                "mix_factor": 0.3
+            }, {
+                "source_speaker": "BV120_streaming",
+                "mix_factor": 0.3
+            }, {
+                "source_speaker": "zh_male_ahu_conversation_wvae_bigtts",
+                "mix_factor": 0.4
+            }]
+        }
+    }
+}
+```
+
+<span id="7196a9df"></span>
+## 2.2 响应Response
+<span id="4272eb93"></span>
+### 建连响应
+主要关注建连阶段 HTTP Response 的状态码和 Body
+
+* 建连成功：状态码为 200
+* 建连失败：状态码不为 200，Body 中提供错误原因说明
+
+<span id="2d7a5370"></span>
+### WebSocket 传输响应
+<span id="141caac4"></span>
+#### 二进制帧 - 正常响应帧
+
+| | | | | \
+|Byte |Left 4-bit |Right 4-bit |说明 |
+|---|---|---|---|
+| | | | | \
+|0 - Left half |Protocol version | |目前只有v1，始终填0b0001 |
+| | | | | \
+|0 - Right half | |Header size (4x) |目前只有4字节，始终填0b0001 |
+| | | | | \
+|1 - Left half |Message type | |音频帧返回：0b1011 |\
+| | | |其他帧返回：0b1001 |
+| | | | | \
+|1 - Right half | |Message type specific flags |固定为0b0100 |
+| | | | | \
+|2 - Left half |Serialization method | |0b0000：Raw（无特殊序列化方式，主要针对二进制音频数据）0b0001：JSON（主要针对文本类型消息） |
+| | | | | \
+|2 - Right half | |Compression method |0b0000：无压缩0b0001：gzip |
+| | || | \
+|3 |Reserved | |留空（0b0000 0000） |
+| | || | \
+|[4 ~ 7] |[Optional field,like event number,...] |\
+| | | |取决于Message type specific flags，可能有、也可能没有 |
+| | || | \
+|... |Payload | |可能是音频数据、文本数据、音频文本混合数据 |
+
+<span id="c7404398"></span>
+##### payload响应参数
+
 | | | | \
-|报头大小(Header size) (4) |header 实际大小是 `header size value x 4` bytes. |\
-| |这里有个特殊值 `0b1111` 表示 header 大小大于或等于 60(15 x 4 bytes)，也就是会存在 header extension 字段。 |`0b0001` - 报头大小 ＝ 4 (1 x 4) |\
-| | |`0b0010` - 报头大小 ＝ 8 (2 x 4) |\
-| | |`0b1010` - 报头大小 ＝ 40 (10 x 4) |\
-| | |`0b1110` - 报头大小 = 56 (14 x 4) |\
-| | |`0b1111` - 报头大小为 60 或更大; 实际大小在 header extension 中定义 |
-| | | | \
-|消息类型(Message type) (4) |定义消息类型。 |`0b0001` - full client request. |\
-| | |`~~0b1001~~` ~~- full server response(弃用).~~ |\
-| | |`0b1011` - Audio-only server response (ACK). |\
-| | |`0b1111` - Error message from server (例如错误的消息类型，不支持的序列化方法等等) |
-| | | | \
-|Message type specific flags (4) |flags 含义取决于消息类型。 |\
-| |具体内容请看消息类型小节. | |
-| | | | \
-|序列化方法(Message serialization method) (4) |定义序列化 payload 的方法。 |\
-| |注意：它只对某些特定的消息类型有意义 (例如 Audio-only server response `0b1011` 就不需要序列化). |`0b0000` - 无序列化 (raw bytes) |\
-| | |`0b0001` - JSON |\
-| | |`0b1111` - 自定义类型, 在 header extension 中定义 |
-| | | | \
-|压缩方法(Message Compression) (4) |定义 payload 的压缩方法。 |\
-| |Payload size 字段不压缩(如果有的话，取决于消息类型)，而且 Payload size 指的是 payload 压缩后的大小。 |\
-| |Header 不压缩。 |`0b0000` - 无压缩 |\
-| | |`0b0001` - gzip |\
-| | |`0b1111` - 自定义压缩方法, 在 header extension 中定义 |
-| | | | \
-|保留字段(Reserved) (8) |保留字段，同时作为边界 (使整个报头大小为 4 个字节). |`0x00` - 目前只有 0 |
-
-<span id="95a31a2c"></span>
-#### 消息类型详细说明
-目前所有 TTS websocket 请求都使用 full client request 格式，无论"query"还是"submit"。
-<span id="d05f01f6"></span>
-#### Full client request
-
-* Header size为`b0001`(即 4B，没有 header extension)。
-* Message type为`b0001`.
-* Message type specific flags 固定为`b0000`.
-* Message serialization method为`b0001`JSON。字段参考上方表格。
-* 如果使用 gzip 压缩 payload，则 payload size 为压缩后的大小。
-
-<span id="6e82d7df"></span>
-#### Audio-only server response
-
-* Header size 应该为`b0001`.
-* Message type为`b1011`.
-* Message type specific flags 可能的值有：
-   * `b0000` - 没有 sequence number.
-   * `b0001` - sequence number > 0.
-   * `b0010`or`b0011` - sequence number < 0，表示来自服务器的最后一条消息，此时客户端应合并所有音频片段(如果有多条)。
-* Message serialization method为`b0000`(raw bytes).
-
-<span id="4f9397bc"></span>
-## 4.注意事项
-
-* 每次合成时reqid这个参数需要重新设置，且要保证唯一性（建议使用uuid.V4生成）
-* websocket demo中单条链接仅支持单次合成，若需要合成多次，需自行实现。每次创建websocket连接后，按顺序串行发送每一包。一次合成结束后，可以发送新的合成请求。
-* operation需要设置为submit才是流式返回
-* 在 websocket 握手成功后，会返回这些 Response header
-* 不支持["豆包语音合成模型2.0"的音色](https://www.volcengine.com/docs/6561/1257544)，比如："zh_female_vv_uranus_bigtts"，如需使用推荐使用v3 接口
-
-
-| | | | \
-|Key |说明 |Value 示例 |
+|字段 |描述 |类型 |
 |---|---|---|
 | | | | \
-|X-Tt-Logid |服务端返回的 logid，建议用户获取和打印方便定位问题 |202407261553070FACFE6D19421815D605 |
+|data |返回的二进制数据包 |[]byte |
+| | | | \
+|event |返回的事件类型 |number |
+| | | | \
+|res_params.text |经文本分句后的句子 |string |
 
-<span id="fe504ac4"></span>
-## 5.调用示例
+<span id="65eb0f21"></span>
+#### 二进制帧 - 错误响应帧
+
+| | | | | \
+|Byte |Left 4-bit |Right 4-bit |说明 |
+|---|---|---|---|
+| | | | | \
+|0 - Left half |Protocol version | |目前只有v1，始终填0b0001 |
+| | | | | \
+|0 - Right half | |Header size (4x) |目前只有4字节，始终填0b0001 |
+| | | | | \
+|1  |Message type |Message type specific flags |0b11110000 |
+| | | | | \
+|2 - Left half |Serialization method | |0b0000：Raw（无特殊序列化方式，主要针对二进制音频数据）0b0001：JSON（主要针对文本类型消息） |
+| | | | | \
+|2 - Right half | |Compression method |0b0000：无压缩0b0001：gzip |
+| | || | \
+|3 |Reserved | |留空（0b0000 0000） |
+| | || | \
+|[4 ~ 7] |Error code | |错误码 |
+| | || | \
+|... |Payload | |错误消息对象 |
+
+<span id="37909556"></span>
+## 2.3 event定义
+在发送文本转TTS阶段，不需要客户端发送上行的event帧。event类型如下：
+
+| | | | | \
+|Event code |含义 |事件类型 |应用阶段：上行/下行 |
+|---|---|---|---|
+| | | | | \
+|152 |SessionFinished，会话已结束（上行&下行） |\
+| |标识语音一个完整的语音合成完成 |Session 类 |下行 |
+| | | | | \
+|350 |TTSSentenceStart，TTS 返回句内容开始 |数据类 |下行 |
+| | | | | \
+|351 |TTSSentenceEnd，TTS 返回句内容结束 |数据类 |下行 |
+| | | | | \
+|352 |TTSResponse，TTS 返回句的音频内容 |数据类 |下行 |
+
+在关闭连接阶段，需要客户端传递上行event帧去关闭连接。event类型如下：
+
+| | | | | \
+|Event code |含义 |事件类型 |应用阶段：上行/下行 |
+|---|---|---|---|
+| | | | | \
+|2 |FinishConnection，结束连接 |Connect 类 |上行 |
+| | | | | \
+|52 |ConnectionFinished 结束连接成功 |Connect 类 |下行 |
+
+交互示例：
+![Image](https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/a9005d7ddd564ad79ad6dda9699a4a65~tplv-goo7wpa0wc-image.image =419x)
+<span id="71e5b133"></span>
+## 2.4 不同类型帧举例说明
+<span id="109f8def"></span>
+### SendText
+<span id="3544c657"></span>
+#### 请求Request
+
+| | | | || \
+|Byte |Left 4-bit |Right 4-bit |说明 | |
+|---|---|---|---|---|
+| | | | | | \
+|0 |0001 |0001 |v1 |4-byte header |
+| | | | | | \
+|1 |0001 |0000 |Full-client request |with no event number |
+| | | | | | \
+|2 |0001 |0000 |JSON |no compression |
+| | | | | | \
+|3 |0000 |0000 | | |
+| | || || \
+|4 ~ 7 |uint32(...) | |len(payload_json) | |
+| | || || \
+|8 ~ ... |\
+| |{...} |\
+| | | |文本 |\
+| | | | | |
+
+payload
+```JSON
+{
+    "user": {
+        "uid": "12345"
+    },
+    "req_params": {
+        "text": "明朝开国皇帝朱元璋也称这本书为,万物之根",
+        "speaker": "zh_female_shuangkuaisisi_moon_bigtts",
+        "audio_params": {
+            "format": "mp3",
+            "sample_rate": 24000
+        },
+      }
+    }
+}
+```
+
+<span id="9b307cb7"></span>
+#### 响应Response
+<span id="683ea12d"></span>
+##### TTSSentenceStart
+
+| | | | || \
+|Byte |Left 4-bit |Right 4-bit |说明 | |
+|---|---|---|---|---|
+| | | | | | \
+|0 |0001 |0001 |v1 |4-byte header |
+| | | | | | \
+|1 |1001 |0100 |Full-client request |with event number |
+| | | | | | \
+|2 |0001 |0000 |JSON |no compression |
+| | | | | | \
+|3 |0000 |0000 | | |
+| | || || \
+|4 ~ 7 |TTSSentenceStart | |event type | |
+| | || || \
+|8 ~ 11 |uint32(12) | |len(<session_id>) | |
+| | || || \
+|12 ~ 23 |nxckjoejnkegf | |session_id | |
+| | || || \
+|24 ~ 27 |uint32( ...) | |len(text_binary) | |
+| | || || \
+|28 ~ ... |\
+| |{...} | |text_binary | |
+
+<span id="3da131c9"></span>
+##### TTSResponse
+
+| | | | || \
+|Byte |Left 4-bit |Right 4-bit |说明 | |
+|---|---|---|---|---|
+| | | | | | \
+|0 |0001 |0001 |v1 |4-byte header |
+| | | | | | \
+|1 |1011 |0100 |Audio-only response |with event number |
+| | | | | | \
+|2 |0001 |0000 |JSON |no compression |
+| | | | | | \
+|3 |0000 |0000 | | |
+| | || | | \
+|4 ~ 7 |TTSResponse | |event type | |
+| | || | | \
+|8 ~ 11 |uint32(12) | |len(<session_id>) | |
+| | || | | \
+|12 ~ 23 |nxckjoejnkegf | |session_id | |
+| | || | | \
+|24 ~ 27 |uint32( ...) | |len(audio_binary) | |
+| | || | | \
+|28 ~ ... |{...} |\
+| | | |audio_binary |\
+| | | | | |
+
+<span id="edc35acf"></span>
+##### TTSSentenceEnd
+
+| | | | || \
+|Byte |Left 4-bit |Right 4-bit |说明 | |
+|---|---|---|---|---|
+| | | | | | \
+|0 |0001 |0001 |v1 |4-byte header |
+| | | | | | \
+|1 |1001 |0100 |Full-client request |with event number |
+| | | | | | \
+|2 |0001 |0000 |JSON |no compression |
+| | | | | | \
+|3 |0000 |0000 | | |
+| | || || \
+|4 ~ 7 |TTSSentenceEnd | |event type | |
+| | || || \
+|8 ~ 11 |uint32(12) | |len(<session_id>) | |
+| | || || \
+|12 ~ 23 |nxckjoejnkegf | |session_id | |
+| | || || \
+|24 ~ 27 |uint32( ...) | |len(payload) | |
+| | || || \
+|28 ~ ... |{...} |\
+| | | |payload |\
+| | | | | |
+
+<span id="04a1a1b7"></span>
+##### SessionFinished
+
+| | | | || \
+|Byte |Left 4-bit |Right 4-bit |说明 | |
+|---|---|---|---|---|
+| | | | | | \
+|0 |0001 |0001 |v1 |4-byte header |
+| | | | | | \
+|1 |1001 |0100 |Full-client request |with event number |
+| | | | | | \
+|2 |0001 |0000 |JSON |no compression |
+| | | | | | \
+|3 |0000 |0000 | | |
+| | || | | \
+|4 ~ 7 |SessionFinished | |event type | |
+| | || || \
+|8 ~ 11 |uint32(12) | |len(<session_id>) | |
+| | || || \
+|12 ~ 23 |nxckjoejnkegf | |session_id | |
+| | || || \
+|24 ~ 27 |uint32( ...) | |len(response_meta_json) | |
+| | || || \
+|28 ~ ... |{ |\
+| | "status_code": 20000000, |\
+| | "message": "ok"， |\
+| |"usage": { |\
+| |        "text_words"：4 |\
+| |    } |\
+| |} |\
+| | | |response_meta_json |\
+| | | | |\
+| | | |* 仅含status_code和message字段 |\
+| | | |* usage仅当header中携带X-Control-Require-Usage-Tokens-Return存在 | |
+
+<span id="c2620002"></span>
+#### FinishConnection
+<span id="7b009499"></span>
+##### 请求request
+
+| | | | || \
+|Byte |Left 4-bit |Right 4-bit |说明 | |
+|---|---|---|---|---|
+| | | | | | \
+|0 |0001 |0001 |v1 |4-byte header |
+| | | | | | \
+|1 |0001 |0100 |Full-client request |with event number |
+| | | | | | \
+|2 |0001 |0000 |JSON |no compression |
+| | | | | | \
+|3 |0000 |0000 | | |
+| | || || \
+|4-7 |uint32(...) | |len(payload_json) | |
+| | || || \
+|8 ~ ... |\
+| |{...} |\
+| | | |payload_json |\
+| | | |扩展保留，暂留空JSON | |
+
+<span id="9b812c2d"></span>
+##### 响应response
+
+| | | | || \
+|Byte |Left 4-bit |Right 4-bit |说明 | |
+|---|---|---|---|---|
+| | | | | | \
+|0 |0001 |0001 |v1 |4-byte header |
+| | | | | | \
+|1 |1001 |0100 |Full-client request |with event number |
+| | | | | | \
+|2 |0001 |0000 |JSON |no compression |
+| | | | | | \
+|3 |0000 |0000 | | |
+| | || || \
+|4 ~ 7 |ConnectionFinished | |event type | |
+| | || || \
+|8 ~ 11 |uint32(7) | |len(<connection_id>) | |
+| | || || \
+|12 ~ 15 |uint32(58) | |len(<response_meta_json>) | |
+| | || || \
+|28 ~ ... |{ |\
+| | "status_code": 20000000, |\
+| | "message": "ok" |\
+| |} | |response_meta_json |\
+| | | | |\
+| | | |* 仅含status_code和message字段 |\
+| | | | |\
+| | | | | |
+
+<span id="8164feca"></span>
+# 3 错误码
+
+| | | | \
+|Code |Message |说明 |
+|---|---|---|
+| | | | \
+|20000000 |ok |音频合成结束的成功状态码 |
+| | | | \
+|45000000 |\
+| |speaker permission denied: get resource id: access denied |音色鉴权失败，一般是speaker指定音色未授权或者错误导致 |\
+| | | |
+|^^| | | \
+| |quota exceeded for types: concurrency |并发限流，一般是请求并发数超过限制 |
+| | | | \
+|55000000 |服务端一些error |服务端通用错误 |
+
+<span id="00165867"></span>
+# 4 调用示例
 
 ```mixin-react
 return (<Tabs>
-<Tabs.TabPane title="Python调用示例" key="buVUUlzaRC"><RenderMd content={`<span id="fccb89b1"></span>
+<Tabs.TabPane title="Python调用示例" key="iYrQ6gaeNz"><RenderMd content={`<span id="32c5df89"></span>
 ### 前提条件
 
 * 调用之前，您需要获取以下信息：
@@ -127,7 +733,7 @@ return (<Tabs>
    * \`<access_token>\`：使用控制台获取的Access Token，可参考 [控制台使用FAQ-Q1](https://www.volcengine.com/docs/6561/196768#q1%EF%BC%9A%E5%93%AA%E9%87%8C%E5%8F%AF%E4%BB%A5%E8%8E%B7%E5%8F%96%E5%88%B0%E4%BB%A5%E4%B8%8B%E5%8F%82%E6%95%B0appid%EF%BC%8Ccluster%EF%BC%8Ctoken%EF%BC%8Cauthorization-type%EF%BC%8Csecret-key-%EF%BC%9F)。
    * \`<voice_type>\`：您预期使用的音色ID，可参考 [大模型音色列表](https://www.volcengine.com/docs/6561/1257544)。
 
-<span id="824abc9d"></span>
+<span id="e50a7eed"></span>
 ### Python环境
 
 * Python：3.9版本及以上。
@@ -137,33 +743,33 @@ return (<Tabs>
 python3 -m pip install --upgrade pip
 \`\`\`
 
-<span id="5cbec8af"></span>
+<span id="57159ec2"></span>
 ### 下载代码示例
-<Attachment link="https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/90fc1f44eaac49f0b4e2cbabdaee8010~tplv-goo7wpa0wc-image.image" name="volcengine_binary_demo.tar.gz" ></Attachment>
-<span id="44d95afb"></span>
+<Attachment link="https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/a67dd285912648c2980a853c486c560f~tplv-goo7wpa0wc-image.image" name="volcengine_unidirectional_stream_demo.tar.gz" ></Attachment>
+<span id="b93a1eb6"></span>
 ### 解压缩代码包，安装依赖
 \`\`\`Bash
-mkdir -p volcengine_binary_demo
-tar xvzf volcengine_binary_demo.tar.gz -C ./volcengine_binary_demo
-cd volcengine_binary_demo
+mkdir -p volcengine_unidirectional_stream_demo
+tar xvzf volcengine_unidirectional_stream_demo.tar.gz -C ./volcengine_unidirectional_stream_demo
+cd volcengine_unidirectional_stream_demo
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
 pip3 install -e .
 \`\`\`
 
-<span id="fdf69422"></span>
+<span id="a0896222"></span>
 ### 发起调用
 > \`<appid>\`替换为您的APP ID。
 > \`<access_token>\`替换为您的Access Token。
 > \`<voice_type>\`替换为您预期使用的音色ID，例如\`zh_female_cancan_mars_bigtts\`。
 
 \`\`\`Bash
-python3 examples/volcengine/binary.py --appid <appid> --access_token <access_token> --voice_type <voice_type> --text "你好，我是火山引擎的语音合成服务。这是一个美好的旅程。"
+python3 examples/volcengine/unidirectional_stream.py --appid <appid> --access_token <access_token> --voice_type <voice_type> --text "你好，我是火山引擎的语音合成服务。这是一个美好的旅程。"
 \`\`\`
 
 `}></RenderMd></Tabs.TabPane>
-<Tabs.TabPane title="Java调用示例" key="bfjarx0zlZ"><RenderMd content={`<span id="e0bca07e"></span>
+<Tabs.TabPane title="Java调用示例" key="OeOm28iImI"><RenderMd content={`<span id="c778cfe1"></span>
 ### 前提条件
 
 * 调用之前，您需要获取以下信息：
@@ -171,35 +777,35 @@ python3 examples/volcengine/binary.py --appid <appid> --access_token <access_tok
    * \`<access_token>\`：使用控制台获取的Access Token，可参考 [控制台使用FAQ-Q1](https://www.volcengine.com/docs/6561/196768#q1%EF%BC%9A%E5%93%AA%E9%87%8C%E5%8F%AF%E4%BB%A5%E8%8E%B7%E5%8F%96%E5%88%B0%E4%BB%A5%E4%B8%8B%E5%8F%82%E6%95%B0appid%EF%BC%8Ccluster%EF%BC%8Ctoken%EF%BC%8Cauthorization-type%EF%BC%8Csecret-key-%EF%BC%9F)。
    * \`<voice_type>\`：您预期使用的音色ID，可参考 [大模型音色列表](https://www.volcengine.com/docs/6561/1257544)。
 
-<span id="5f338843"></span>
+<span id="28217763"></span>
 ### Java环境
 
 * Java：21版本及以上。
 * Maven：3.9.10版本及以上。
 
-<span id="96af51fa"></span>
+<span id="e56568a4"></span>
 ### 下载代码示例
-<Attachment link="https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/ba78519b2dc0459fb7a6935b63775c66~tplv-goo7wpa0wc-image.image" name="volcengine_binary_demo.tar.gz" ></Attachment>
-<span id="8e0ecd00"></span>
+<Attachment link="https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/ad93b596b83445de994f9dc991ef5a83~tplv-goo7wpa0wc-image.image" name="volcengine_unidirectional_stream_demo.tar.gz" ></Attachment>
+<span id="25d4d614"></span>
 ### 解压缩代码包，安装依赖
 \`\`\`Bash
-mkdir -p volcengine_binary_demo
-tar xvzf volcengine_binary_demo.tar.gz -C ./volcengine_binary_demo
-cd volcengine_binary_demo
+mkdir -p volcengine_unidirectional_stream_demo
+tar xvzf volcengine_unidirectional_stream_demo.tar.gz -C ./volcengine_unidirectional_stream_demo
+cd volcengine_unidirectional_stream_demo
 \`\`\`
 
-<span id="fa0a6230"></span>
+<span id="c9ffd562"></span>
 ### 发起调用
 > \`<appid>\`替换为您的APP ID。
 > \`<access_token>\`替换为您的Access Token。
 > \`<voice_type>\`替换为您预期使用的音色ID，例如\`zh_female_cancan_mars_bigtts\`。
 
 \`\`\`Bash
-mvn compile exec:java -Dexec.mainClass=com.speech.volcengine.Binary -DappId=<appid> -DaccessToken=<access_token> -Dvoice=<voice_type> -Dtext="**你好**，我是豆包语音助手，很高兴认识你。这是一个愉快的旅程。"
+mvn compile exec:java -Dexec.mainClass=com.speech.volcengine.UnidirectionalStream -DappId=<appid> -DaccessToken=<access_token> -Dvoice=<voice_type> -Dtext="**你好**，我是豆包语音助手，很高兴认识你。这是一个愉快的旅程。"
 \`\`\`
 
 `}></RenderMd></Tabs.TabPane>
-<Tabs.TabPane title="Go调用示例" key="s8zQJ7cCr3"><RenderMd content={`<span id="2733f4d4"></span>
+<Tabs.TabPane title="Go调用示例" key="vZz5H44DbG"><RenderMd content={`<span id="0fc38f07"></span>
 ### 前提条件
 
 * 调用之前，您需要获取以下信息：
@@ -207,34 +813,34 @@ mvn compile exec:java -Dexec.mainClass=com.speech.volcengine.Binary -DappId=<app
    * \`<access_token>\`：使用控制台获取的Access Token，可参考 [控制台使用FAQ-Q1](https://www.volcengine.com/docs/6561/196768#q1%EF%BC%9A%E5%93%AA%E9%87%8C%E5%8F%AF%E4%BB%A5%E8%8E%B7%E5%8F%96%E5%88%B0%E4%BB%A5%E4%B8%8B%E5%8F%82%E6%95%B0appid%EF%BC%8Ccluster%EF%BC%8Ctoken%EF%BC%8Cauthorization-type%EF%BC%8Csecret-key-%EF%BC%9F)。
    * \`<voice_type>\`：您预期使用的音色ID，可参考 [大模型音色列表](https://www.volcengine.com/docs/6561/1257544)。
 
-<span id="ee9617a6"></span>
+<span id="9984b64a"></span>
 ### Go环境
 
 * Go：1.21.0版本及以上。
 
-<span id="cf9bb2bf"></span>
+<span id="66b098f9"></span>
 ### 下载代码示例
-<Attachment link="https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/c553a4a4373840d4a4870a1ef2a4e494~tplv-goo7wpa0wc-image.image" name="volcengine_binary_demo.tar.gz" ></Attachment>
-<span id="363963c4"></span>
+<Attachment link="https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/00313795a9c041fda8d105ef9c6e2f47~tplv-goo7wpa0wc-image.image" name="volcengine_unidirectional_stream_demo.tar.gz" ></Attachment>
+<span id="8303b57b"></span>
 ### 解压缩代码包，安装依赖
 \`\`\`Bash
-mkdir -p volcengine_binary_demo
-tar xvzf volcengine_binary_demo.tar.gz -C ./volcengine_binary_demo
-cd volcengine_binary_demo
+mkdir -p volcengine_unidirectional_stream_demo
+tar xvzf volcengine_unidirectional_stream_demo.tar.gz -C ./volcengine_unidirectional_stream_demo
+cd volcengine_unidirectional_stream_demo
 \`\`\`
 
-<span id="f0acb02c"></span>
+<span id="757d5902"></span>
 ### 发起调用
 > \`<appid>\`替换为您的APP ID。
 > \`<access_token>\`替换为您的Access Token。
 > \`<voice_type>\`替换为您预期使用的音色ID，例如\`zh_female_cancan_mars_bigtts\`。
 
 \`\`\`Bash
-go run volcengine/binary/main.go --appid <appid> --access_token <access_token> --voice_type <voice_type> --text "**你好**，我是火山引擎的语音合成服务。"
+go run volcengine/unidirectional_stream/main.go --appid <appid> --access_token <access_token> --voice_type <voice_type> --text "**你好**，我是火山引擎的语音合成服务。"
 \`\`\`
 
 `}></RenderMd></Tabs.TabPane>
-<Tabs.TabPane title="C#调用示例" key="Thg5rLaSjq"><RenderMd content={`<span id="c60c1d5f"></span>
+<Tabs.TabPane title="C#调用示例" key="ty6KpXuQRP"><RenderMd content={`<span id="ad8b79ae"></span>
 ### 前提条件
 
 * 调用之前，您需要获取以下信息：
@@ -242,34 +848,34 @@ go run volcengine/binary/main.go --appid <appid> --access_token <access_token> -
    * \`<access_token>\`：使用控制台获取的Access Token，可参考 [控制台使用FAQ-Q1](https://www.volcengine.com/docs/6561/196768#q1%EF%BC%9A%E5%93%AA%E9%87%8C%E5%8F%AF%E4%BB%A5%E8%8E%B7%E5%8F%96%E5%88%B0%E4%BB%A5%E4%B8%8B%E5%8F%82%E6%95%B0appid%EF%BC%8Ccluster%EF%BC%8Ctoken%EF%BC%8Cauthorization-type%EF%BC%8Csecret-key-%EF%BC%9F)。
    * \`<voice_type>\`：您预期使用的音色ID，可参考 [大模型音色列表](https://www.volcengine.com/docs/6561/1257544)。
 
-<span id="cf2199fe"></span>
+<span id="c2214808"></span>
 ### C#环境
 
 * .Net 9.0版本。
 
-<span id="f7e91692"></span>
+<span id="dc062b19"></span>
 ### 下载代码示例
-<Attachment link="https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/a95ff3e7604d4bb4ade8fb49e110fef5~tplv-goo7wpa0wc-image.image" name="volcengine_binary_demo.tar.gz" ></Attachment>
-<span id="f9131897"></span>
+<Attachment link="https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/ebca47d9446a436caf379cb5c08d5b47~tplv-goo7wpa0wc-image.image" name="volcengine_unidirectional_stream_demo.tar.gz" ></Attachment>
+<span id="e8bce75a"></span>
 ### 解压缩代码包，安装依赖
 \`\`\`Bash
-mkdir -p volcengine_binary_demo
-tar xvzf volcengine_binary_demo.tar.gz -C ./volcengine_binary_demo
-cd volcengine_binary_demo
+mkdir -p volcengine_unidirectional_stream_demo
+tar xvzf volcengine_unidirectional_stream_demo.tar.gz -C ./volcengine_unidirectional_stream_demo
+cd volcengine_unidirectional_stream_demo
 \`\`\`
 
-<span id="5834585b"></span>
+<span id="a82d7a34"></span>
 ### 发起调用
 > \`<appid>\`替换为您的APP ID。
 > \`<access_token>\`替换为您的Access Token。
 > \`<voice_type>\`替换为您预期使用的音色ID，例如\`zh_female_cancan_mars_bigtts\`。
 
 \`\`\`Bash
-dotnet run --project Volcengine/Binary/Volcengine.Speech.Binary.csproj -- --appid <appid> --access_token <access_token> --voice_type <voice_type> --text "**你好**，这是一个测试文本。我们正在测试文本转语音功能。"
+dotnet run --project Volcengine/UnidirectionalStream/Volcengine.Speech.UnidirectionalStream.csproj -- --appid <appid> --access_token <access_token> --voice_type <voice_type> --text "**你好**，这是一个测试文本。我们正在测试文本转语音功能。"
 \`\`\`
 
 `}></RenderMd></Tabs.TabPane>
-<Tabs.TabPane title="TypeScript调用示例" key="p1GEs3rWU7"><RenderMd content={`<span id="8b865031"></span>
+<Tabs.TabPane title="TypeScript调用示例" key="fsH2BSKG95"><RenderMd content={`<span id="dcc516e7"></span>
 ### 前提条件
 
 * 调用之前，您需要获取以下信息：
@@ -277,356 +883,36 @@ dotnet run --project Volcengine/Binary/Volcengine.Speech.Binary.csproj -- --appi
    * \`<access_token>\`：使用控制台获取的Access Token，可参考 [控制台使用FAQ-Q1](https://www.volcengine.com/docs/6561/196768#q1%EF%BC%9A%E5%93%AA%E9%87%8C%E5%8F%AF%E4%BB%A5%E8%8E%B7%E5%8F%96%E5%88%B0%E4%BB%A5%E4%B8%8B%E5%8F%82%E6%95%B0appid%EF%BC%8Ccluster%EF%BC%8Ctoken%EF%BC%8Cauthorization-type%EF%BC%8Csecret-key-%EF%BC%9F)。
    * \`<voice_type>\`：您预期使用的音色ID，可参考 [大模型音色列表](https://www.volcengine.com/docs/6561/1257544)。
 
-<span id="e7697c4e"></span>
+<span id="cb1aa0a9"></span>
 ### node环境
 
 * node：v24.0版本及以上。
 
-<span id="03fe45f1"></span>
+<span id="abd541dd"></span>
 ### 下载代码示例
-<Attachment link="https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/12ef1b1188a84f0c8883a0114da741ad~tplv-goo7wpa0wc-image.image" name="volcengine_binary_demo.tar.gz" ></Attachment>
-<span id="13e8a71a"></span>
+<Attachment link="https://p9-arcosite.byteimg.com/tos-cn-i-goo7wpa0wc/27e058ffbf9d4dac9bc91cb0258c459a~tplv-goo7wpa0wc-image.image" name="volcengine_unidirectional_stream_demo.tar.gz" ></Attachment>
+<span id="ad736548"></span>
 ### 解压缩代码包，安装依赖
 \`\`\`Bash
-mkdir -p volcengine_binary_demo
-tar xvzf volcengine_binary_demo.tar.gz -C ./volcengine_binary_demo
-cd volcengine_binary_demo
+mkdir -p volcengine_unidirectional_stream_demo
+tar xvzf volcengine_unidirectional_stream_demo.tar.gz -C ./volcengine_unidirectional_stream_demo
+cd volcengine_unidirectional_stream_demo
 npm install
 npm install -g typescript
 npm install -g ts-node
 \`\`\`
 
-<span id="0c57973f"></span>
+<span id="e391c738"></span>
 ### 发起调用
 > \`<appid>\`替换为您的APP ID。
 > \`<access_token>\`替换为您的Access Token。
 > \`<voice_type>\`替换为您预期使用的音色ID，例如\`<voice_type>\`。
 
 \`\`\`Bash
-npx ts-node src/volcengine/binary.ts --appid <appid> --access_token <access_token> --voice_type <voice_type> --text "**你好**，我是火山引擎的语音合成服务。"
+npx ts-node src/volcengine/unidirectional_stream.ts --appid <appid> --access_token <access_token> --voice_type <voice_type> --text "**你好**，我是火山引擎的语音合成服务。"
 \`\`\`
 
 `}></RenderMd></Tabs.TabPane></Tabs>);
  ```
-
-<span id="9ea45813"></span>
-# HTTP
-> 使用账号申请部分申请到的 appid&access_token 进行调用
-> 文本全部合成完毕之后，一次性返回全部的音频数据
-
-<span id="4d23f0f6"></span>
-## 1. 接口说明
-接口地址为 **https://openspeech.bytedance.com/api/v1/tts**
-<span id="6f96a6fa"></span>
-## 2. 身份认证
-认证方式采用 Bearer Token.
-1)需要在请求的 Header 中填入"Authorization":"Bearer;${token}"
-:::warning
-Bearer 和 token 使用分号 ; 分隔，替换时请勿保留${}
-:::
-AppID/Token/Cluster 等信息可参考 [控制台使用FAQ-Q1](/docs/6561/196768#q1：哪里可以获取到以下参数appid，cluster，token，authorization-type，secret-key-？)
-<span id="a8c19c9a"></span>
-## 3. 注意事项
-
-* 使用 HTTP Post 方式进行请求，返回的结果为 JSON 格式，需要进行解析
-* 因 json 格式无法直接携带二进制音频，音频经 base64 编码。使用 base64 解码后，即为二进制音频
-* 每次合成时 reqid 这个参数需要重新设置，且要保证唯一性（建议使用 UUID/GUID 等生成）
-* 不支持["豆包语音合成模型2.0"的音色](https://www.volcengine.com/docs/6561/1257544)，比如："zh_female_vv_uranus_bigtts"，如需使用推荐使用v3 接口
-
-<span id="参数列表"></span>
-# 参数列表
-> Websocket 与 Http 调用参数相同
-
-<span id="931a7b76"></span>
-## 请求参数
-
-| | | | | | | \
-|字段 |含义 |层级 |格式 |必需 |备注 |
-|---|---|---|---|---|---|
-| | | | | | | \
-|app |应用相关配置 |1 |dict |✓ | |
-| | | | | | | \
-|appid |应用标识 |2 |string |✓ |需要申请 |
-| | | | | | | \
-|token |应用令牌 |2 |string |✓ |无实际鉴权作用的Fake token，可传任意非空字符串 |
-| | | | | | | \
-|cluster |业务集群 |2 |string |✓ |volcano_tts |
-| | | | | | | \
-|user |用户相关配置 |1 |dict |✓ | |
-| | | | | | | \
-|uid |用户标识 |2 |string |✓ |可传任意非空字符串，传入值可以通过服务端日志追溯 |
-| | | | | | | \
-|audio |音频相关配置 |1 |dict |✓ | |
-| | | | | | | \
-|voice_type |音色类型 |2 |string |✓ | |
-| | | | | | | \
-|emotion |音色情感 |2 |string | |设置音色的情感。示例："emotion": "angry" |\
-| | | | | |注：当前仅部分音色支持设置情感，且不同音色支持的情感范围存在不同。 |\
-| | | | | |详见：[大模型语音合成API-音色列表-多情感音色](https://www.volcengine.com/docs/6561/1257544) |
-| | | | | | | \
-|enable_emotion |开启音色情感 |2 |bool | |是否可以设置音色情感，需将enable_emotion设为true |\
-| | | | | |示例："enable_emotion": True |
-| | | | | | | \
-|emotion_scale |情绪值设置 |2 |float | |调用emotion设置情感参数后可使用emotion_scale进一步设置情绪值，范围1~5，不设置时默认值为4。 |\
-| | | | | |注：理论上情绪值越大，情感越明显。但情绪值1~5实际为非线性增长，可能存在超过某个值后，情绪增加不明显，例如设置3和5时情绪值可能接近。 |
-| | | | | | | \
-|encoding |音频编码格式 |2 |string | |wav / pcm / ogg_opus / mp3，默认为 pcm |\
-| | | | | |<span style="background-color: rgba(255,246,122, 0.8)">注意：wav 不支持流式</span> |
-| | | | | | | \
-|speed_ratio |语速 |2 |float | |[0.1,2]，默认为 1，通常保留一位小数即可 |
-| | | | | | | \
-|rate |音频采样率 |2 |int | |默认为 24000，可选8000，16000 |
-| | | | | | | \
-|bitrate |比特率 |2 |int | |单位 kb/s，默认160 kb/s |\
-| | | | | |**注：** |\
-| | | | | |bitrate只针对MP3格式，wav计算比特率跟pcm一样是 比特率 (bps) = 采样率 × 位深度 × 声道数 |\
-| | | | | |目前大模型TTS只能改采样率，所以对于wav格式来说只能通过改采样率来变更音频的比特率 |
-| | | | | | | \
-|explicit_language |明确语种 |2 |string | |仅读指定语种的文本 |\
-| | | | | |精品音色和 ICL 声音复刻场景： |\
-| | | | | | |\
-| | | | | |* 不给定参数，正常中英混 |\
-| | | | | |* `crosslingual` 启用多语种前端（包含`zh/en/ja/es-ms/id/pt-br`） |\
-| | | | | |* `zh-cn` 中文为主，支持中英混 |\
-| | | | | |* `en` 仅英文 |\
-| | | | | |* `ja` 仅日文 |\
-| | | | | |* `es-mx` 仅墨西 |\
-| | | | | |* `id` 仅印尼 |\
-| | | | | |* `pt-br` 仅巴葡 |\
-| | | | | | |\
-| | | | | |DIT 声音复刻场景： |\
-| | | | | |当音色是使用model_type=2训练的，即采用dit标准版效果时，建议指定明确语种，目前支持：  |\
-| | | | | | |\
-| | | | | |* 不给定参数，启用多语种前端`zh,en,ja,es-mx,id,pt-br,de,fr` |\
-| | | | | |* `zh,en,ja,es-mx,id,pt-br,de,fr` 启用多语种前端 |\
-| | | | | |* `zh-cn` 中文为主，支持中英混 |\
-| | | | | |* `en` 仅英文 |\
-| | | | | |* `ja` 仅日文  |\
-| | | | | |* `es-mx` 仅墨西  |\
-| | | | | |* `id` 仅印尼  |\
-| | | | | |* `pt-br` 仅巴葡  |\
-| | | | | |* `de` 仅德语 |\
-| | | | | |* `fr` 仅法语 |\
-| | | | | | |\
-| | | | | |当音色是使用model_type=3训练的，即采用dit还原版效果时，必须指定明确语种，目前支持：  |\
-| | | | | | |\
-| | | | | |* 不给定参数，正常中英混 |\
-| | | | | |* `zh-cn` 中文为主，支持中英混  |\
-| | | | | |* `en` 仅英文 |
-| | | | | | | \
-|context_language |参考语种 |2 |string | |给模型提供参考的语种 |\
-| | | | | | |\
-| | | | | |* 不给定 西欧语种采用英语 |\
-| | | | | |* id 西欧语种采用印尼 |\
-| | | | | |* es 西欧语种采用墨西 |\
-| | | | | |* pt 西欧语种采用巴葡 |
-| | | | | | | \
-|loudness_ratio |音量调节 |2 |float | |[0.5,2]，默认为1，通常保留一位小数即可。0.5代表原音量0.5倍，2代表原音量2倍 |
-| | | | | | | \
-|request |请求相关配置 |1 |dict |✓ | |
-| | | | | | | \
-|reqid |请求标识 |2 |string |✓ |需要保证每次调用传入值唯一，建议使用 UUID |
-| | | | | | | \
-|text |文本 |2 |string |✓ |合成语音的文本，长度限制 1024 字节（UTF-8 编码）建议小于300字符，超出容易增加badcase出现概率或报错 |
-| | | | | | | \
-|model |模型版本 |\
-| | |2 |\
-| | | |string |否 |模型版本，传`seed-tts-1.1`较默认版本音质有提升，并且延时更优，不传为默认效果。 |\
-| | | | | |注：若使用1.1模型效果，在复刻场景中会放大训练音频prompt特质，因此对prompt的要求更高，使用高质量的训练音频，可以获得更优的音质效果。 |
-| | | | | | | \
-|text_type |文本类型 |2 |string | |使用 ssml 时需要指定，值为"ssml" |
-| | | | | | | \
-|silence_duration |句尾静音 |2 |float | |设置该参数可在句尾增加静音时长，范围0~30000ms。（注：增加的句尾静音主要针对传入文本最后的句尾，而非每句话的句尾）若启用该参数，必须在request下首先设置enable_trailing_silence_audio = true |
-| | | | | | | \
-|with_timestamp |时间戳相关 |2 |int |\
-| | | |string | |传入1时表示启用，将返回TN后文本的时间戳，例如：2025。根据语义，TN后文本为“两千零二十五”或“二零二五”。 |\
-| | | | | |注：原文本中的多个标点连用或者空格仍会被处理，但不影响时间戳的连贯性（仅限大模型场景使用）。 |\
-| | | | | |附加说明（小模型和大模型时间戳原理差异）： |\
-| | | | | |1. 小模型依据前端模型生成时间戳，然后合成音频。在处理时间戳时，TN前后文本进行了映射，所以小模型可返回TN前原文本的时间戳，即保留原文中的阿拉伯数字或者特殊符号等。 |\
-| | | | | |2. 大模型在对传入文本语义理解后合成音频，再针对合成音频进行TN后打轴以输出时间戳。若不采用TN后文本，输出的时间戳将与合成音频无法对齐，所以大模型返回的时间戳对应TN后的文本。 |
-| | | | | | | \
-|operation |操作 |2 |string |✓ |query（非流式，http 只能 query） / submit（流式） |
-| | | | | | | \
-|extra_param |附加参数 |2 |jsonstring | | |
-| | | | | | | \
-|disable_markdown_filter | |3 |bool | |是否开启markdown解析过滤， |\
-| | | | | |为true时，解析并过滤markdown语法，例如，**你好**，会读为“你好”， |\
-| | | | | |为false时，不解析不过滤，例如，**你好**，会读为“星星‘你好’星星” |\
-| | | | | |示例："disable_markdown_filter": True |
-| | | | | | | \
-|enable_latex_tn | |3 |bool | |是否可以播报latex公式，需将disable_markdown_filter设为true |\
-| | | | | |示例："enable_latex_tn": True |
-| | | | | | | \
-|mute_cut_remain_ms |句首静音参数 |3 |string | |该参数需配合mute_cut_threshold参数一起使用，其中： |\
-| | | | | |"mute_cut_threshold": "400",   // 静音判断的阈值（音量小于该值时判定为静音） |\
-| | | | | |"mute_cut_remain_ms": "50", // 需要保留的静音长度 |\
-| | | | | |注：参数和value都为string格式 |\
-| | | | | |以python为示例： |\
-| | | | | |```Python |\
-| | | | | |"extra_param":("{\"mute_cut_threshold\":\"400\", \"mute_cut_remain_ms\": \"0\"}") |\
-| | | | | |``` |\
-| | | | | | |\
-| | | | | |特别提醒： |\
-| | | | | | |\
-| | | | | |* 因MP3格式的特殊性，句首始终会存在100ms内的静音无法消除，WAV格式的音频句首静音可全部消除，建议依照自身业务需求综合判断选择 |
-| | | | | | | \
-|disable_emoji_filter |emoji不过滤显示 |3 |bool | |开启emoji表情在文本中不过滤显示，默认为False，建议搭配时间戳参数一起使用。 |\
-| | | | | |Python示例：`"extra_param": json.dumps({"disable_emoji_filter": True})` |
-| | | | | | | \
-|unsupported_char_ratio_thresh |不支持语种占比阈值 |3 |float | |默认: 0.3，最大值: 1.0 |\
-| | | | | |检测出不支持合成的文本超过设置的比例，则会返回错误。 |\
-| | | | | |Python示例：`"extra_param": json.dumps({"`unsupported_char_ratio_thresh`": 0.3})` |
-| | | | | | | \
-|aigc_watermark |是否在合成结尾增加音频节奏标识 |3 |bool | |默认: false |\
-| | | | | |Python示例：`"extra_param": json.dumps({"aigc_watermark": True})` |
-| | | | | | | \
-|cache_config |缓存相关参数 |3 |dict | |开启缓存，开启后合成相同文本时，服务会直接读取缓存返回上一次合成该文本的音频，可明显加快相同文本的合成速率，缓存数据保留时间1小时。 |\
-| | | | | |（通过缓存返回的数据不会附带时间戳） |\
-| | | | | |Python示例：`"extra_param": json.dumps({"cache_config": {"text_type": 1,"use_cache": True}})` |
-| | | | | | | \
-|text_type |缓存相关参数 |4 |int | |和use_cache参数一起使用，需要开启缓存时传1 |
-| | | | | | | \
-|use_cache |缓存相关参数 |4 |bool | |和text_type参数一起使用，需要开启缓存时传true |
-
-
-
-
-备注：
-
-1. 已支持字级别时间戳能力（ssml文本类型不支持）
-2. ssml 能力已支持，详见 [SSML 标记语言--豆包语音-火山引擎 (volcengine.com)](https://www.volcengine.com/docs/6561/1330194)
-3. 暂时不支持音高调节
-4. 大模型音色语种支持中英混
-5. 大模型非双向流式已支持latex公式
-6. 在 websocket/http 握手成功后，会返回这些 Response header
-
-
-| | | | \
-|Key |说明 |Value 示例 |
-|---|---|---|
-| | | | \
-|X-Tt-Logid |服务端返回的 logid，建议用户获取和打印方便定位问题，使用默认格式即可，不要自定义格式 |202407261553070FACFE6D19421815D605 |
-
-请求示例：
-```go
-{
-    "app": {
-        "appid": "appid123",
-        "token": "access_token",
-        "cluster": "volcano_tts",
-    },
-    "user": {
-        "uid": "uid123"
-    },
-    "audio": {
-        "voice_type": "zh_male_M392_conversation_wvae_bigtts",
-        "encoding": "mp3",
-        "speed_ratio": 1.0,
-    },
-    "request": {
-        "reqid": "uuid",
-        "text": "字节跳动语音合成",
-        "operation": "query",
-    }
-}
-```
-
-<span id="返回参数"></span>
-## 返回参数
-
-| | | | | | \
-|字段 |含义 |层级 |格式 |备注 |
-|---|---|---|---|---|
-| | | | | | \
-|reqid |请求 ID |1 |string |请求 ID,与传入的参数中 reqid 一致 |
-| | | | | | \
-|code |请求状态码 |1 |int |错误码，参考下方说明 |
-| | | | | | \
-|message |请求状态信息 |1 |string |错误信息 |
-| | | | | | \
-|sequence |音频段序号 |1 |int |负数表示合成完毕 |
-| | | | | | \
-|data |合成音频 |1 |string |返回的音频数据，base64 编码 |
-| | | | | | \
-|addition |额外信息 |1 |string |额外信息父节点 |
-| | | | | | \
-|duration |音频时长 |2 |string |返回音频的长度，单位 ms |
-
-响应示例
-```go
-{
-        "reqid": "reqid",
-        "code": 3000,
-        "operation": "query",
-        "message": "Success",
-        "sequence": -1,
-        "data": "base64 encoded binary data",
-        "addition": {
-                "duration": "1960",
-        }
-}
-```
-
-<span id="ca57b94d"></span>
-## 注意事项
-
-* websocket 单条链接仅支持单次合成，若需要合成多次，则需要多次建立链接
-* 每次合成时 reqid 这个参数需要重新设置，且要保证唯一性（建议使用 uuid.V4 生成）
-* operation 需要设置为 submit
-
-<span id="返回码说明"></span>
-# 返回码说明
-
-| | | | | \
-|错误码 |错误描述 |举例 |建议行为 |
-|---|---|---|---|
-| | | | | \
-|3000 |请求正确 |正常合成 |正常处理 |
-| | | | | \
-|3001 |无效的请求 |一些参数的值非法，比如 operation 配置错误 |检查参数 |
-| | | | | \
-|3003 |并发超限 |超过在线设置的并发阈值 |重试；使用 sdk 的情况下切换离线 |
-| | | | | \
-|3005 |后端服务忙 |后端服务器负载高 |重试；使用 sdk 的情况下切换离线 |
-| | | | | \
-|3006 |服务中断 |请求已完成/失败之后，相同 reqid 再次请求 |检查参数 |
-| | | | | \
-|3010 |文本长度超限 |单次请求超过设置的文本长度阈值 |检查参数 |
-| | | | | \
-|3011 |无效文本 |参数有误或者文本为空、文本与语种不匹配、文本只含标点 |检查参数 |
-| | | | | \
-|3030 |处理超时 |单次请求超过服务最长时间限制 |重试或检查文本 |
-| | | | | \
-|3031 |处理错误 |后端出现异常 |重试；使用 sdk 的情况下切换离线 |
-| | | | | \
-|3032 |等待获取音频超时 |后端网络异常 |重试；使用 sdk 的情况下切换离线 |
-| | | | | \
-|3040 |后端链路连接错误 |后端网络异常 |重试 |
-| | | | | \
-|3050 |音色不存在 |检查使用的 voice_type 代号 |检查参数 |
-
-<span id="常见错误返回说明"></span>
-# 常见错误返回说明
-
-1. 错误返回：
-       "message": "quota exceeded for types: xxxxxxxxx_lifetime"
-   **错误原因：试用版用量用完了，需要开通正式版才能继续使用**
-2. 错误返回：
-   "message": "quota exceeded for types: concurrency"
-   **错误原因：并发超过了限定值，需要减少并发调用情况或者增购并发**
-3. 错误返回：
-       "message": "Fail to feed text, reason Init Engine Instance failed"
-   **错误原因：voice_type / cluster 传递错误**
-4. 错误返回：
-   "message": "illegal input text!"
-   **错误原因：传入的 text 无效，没有可合成的有效文本。比如全部是标点符号或者 emoji 表情，或者使用中文音色时，传递日语，以此类推。多语种音色，也需要使用 language 指定对应的语种**
-5. 错误返回：
-   "message": "authenticate request: load grant: requested grant not found"
-   **错误原因：鉴权失败，需要检查 appid&token 的值是否设置正确，同时，鉴权的正确格式为**
-   **headers["Authorization"] = "Bearer;${token}"**
-6. 错误返回：
-   "message': 'extract request resource id: get resource id: access denied"
-   **错误原因：语音合成已开通正式版且未拥有当前音色授权，需要在控制台购买该音色才能调用。标注免费的音色除 BV001_streaming 及 BV002_streaming 外，需要在控制台进行下单（支付 0 元）**
-
 
 

@@ -3,3 +3,5 @@ python-dotenv
 sounddevice
 numpy
 requests
+fastapi
+uvicorn
