@@ -1,25 +1,118 @@
 <!doctype html>
 <html>
+
 <head>
   <meta charset="utf-8" />
   <title>Voice Interaction Test</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 20px; }
-    button { padding: 8px 12px; margin-right: 10px; }
-    #status { margin-top: 10px; color: #444; }
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0;
+      display: flex;
+      height: 100vh;
+    }
+
+    #sidebar {
+      width: 250px;
+      background: #f0f0f0;
+      border-right: 1px solid #ddd;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #main {
+      flex: 1;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    h3 {
+      margin-top: 0;
+    }
+
+    button {
+      padding: 8px 12px;
+      margin-right: 10px;
+      cursor: pointer;
+    }
+
+    #sessionList {
+      list-style: none;
+      padding: 0;
+      margin-top: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .session-item {
+      padding: 10px;
+      background: #fff;
+      border: 1px solid #ddd;
+      margin-bottom: 8px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    .session-item:hover {
+      background: #e0e0e0;
+    }
+
+    .session-item.active {
+      border-color: #007bff;
+      background: #e6f2ff;
+    }
+
+    .session-date {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 4px;
+    }
+
+    .session-title {
+      font-weight: bold;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #status {
+      margin-top: 10px;
+      color: #444;
+    }
+
+    #controls {
+      margin-bottom: 10px;
+    }
   </style>
 </head>
+
 <body>
-  <h3>语音交互测试</h3>
-  <button id="startBtn">开始监听</button>
-  <button id="stopBtn" disabled>停止监听</button>
-  <div id="status">未连接</div>
-  <button id="probeBtn">探测TTS</button>
-  <pre id="log" style="max-height:240px;overflow:auto;background:#f5f5f5;padding:8px;border:1px solid #ddd"></pre>
+  <div id="sidebar">
+    <button id="newChatBtn" style="width: 100%; margin-bottom: 10px;">+ 新对话</button>
+    <div style="font-weight: bold; color: #666;">历史记录 (最近5条)</div>
+    <ul id="sessionList"></ul>
+  </div>
+
+  <div id="main">
+    <h3>语音交互测试</h3>
+    <div id="controls">
+      <button id="startBtn">开始监听</button>
+      <button id="stopBtn" disabled>停止监听</button>
+      <button id="probeBtn">探测TTS</button>
+    </div>
+    <div id="status">未连接</div>
+    <pre id="log" style="flex: 1; overflow:auto; background:#f5f5f5; padding:8px; border:1px solid #ddd"></pre>
+  </div>
+
   <script>
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     const statusEl = document.getElementById('status');
+    const sessionListEl = document.getElementById('sessionList');
+    const newChatBtn = document.getElementById('newChatBtn');
 
     let ws = null;
     let audioCtx = null;
@@ -28,7 +121,75 @@
     let inputSampleRate = 48000;
     let chunkMs = 200;
     let ttsSampleRate = 24000;
+    let currentSessionId = null;
+    let userId = localStorage.getItem('voice_user_id');
+
+    if (!userId) {
+      userId = 'user_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('voice_user_id', userId);
+    }
+
     function log(msg) { const el = document.getElementById('log'); el.textContent += (typeof msg === 'string' ? msg : JSON.stringify(msg)) + "\n"; el.scrollTop = el.scrollHeight; }
+
+    // Fetch and display sessions
+    async function loadSessions() {
+      try {
+        const res = await fetch(`/api/sessions?user_id=${userId}`);
+        const data = await res.json();
+        renderSessions(data.sessions);
+      } catch (e) {
+        console.error("Failed to load sessions", e);
+      }
+    }
+
+    function renderSessions(sessions) {
+      sessionListEl.innerHTML = '';
+      sessions.forEach(s => {
+        const li = document.createElement('li');
+        li.className = 'session-item';
+        if (s.id === currentSessionId) li.classList.add('active');
+
+        const date = new Date(s.updated_at * 1000).toLocaleString();
+        li.innerHTML = `
+          <div class="session-date">${date}</div>
+          <div class="session-title">${s.title || '新对话'}</div>
+        `;
+        li.onclick = () => selectSession(s.id);
+        sessionListEl.appendChild(li);
+      });
+    }
+
+    function selectSession(sid) {
+      currentSessionId = sid;
+      loadSessions(); // Re-render to update active state
+      log(`Selected session: ${sid}`);
+    }
+
+    async function createSession() {
+      try {
+        const res = await fetch('/api/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId })
+        });
+        const data = await res.json();
+        return data.session_id;
+      } catch (e) {
+        log("Error creating session: " + e);
+        return null;
+      }
+    }
+
+    newChatBtn.onclick = async () => {
+      const sid = await createSession();
+      if (sid) {
+        selectSession(sid);
+        // Optionally auto-start? For now just select.
+      }
+    };
+
+    // Initialize
+    loadSessions();
 
     const pcmPlayer = (() => {
       let ctx = null;
@@ -51,9 +212,9 @@
         };
         node.connect(ctx.destination);
       }
-      function pushPCM16(chunk, inRate=16000) {
+      function pushPCM16(chunk, inRate = 16000) {
         // convert int16 to float
-        const int16 = new Int16Array(chunk.buffer, chunk.byteOffset, Math.floor(chunk.byteLength/2));
+        const int16 = new Int16Array(chunk.buffer, chunk.byteOffset, Math.floor(chunk.byteLength / 2));
         const f = new Float32Array(int16.length);
         for (let i = 0; i < int16.length; i++) f[i] = int16[i] / 32768;
         // resample to ctx sampleRate
@@ -65,7 +226,7 @@
           const idx = Math.floor(srcPos);
           const frac = srcPos - idx;
           const s0 = f[idx] || 0;
-          const s1 = f[idx+1] || s0;
+          const s1 = f[idx + 1] || s0;
           out[i] = s0 + (s1 - s0) * frac;
         }
         const merged = new Float32Array(buffer.length + out.length);
@@ -78,6 +239,15 @@
 
     async function start() {
       if (ws) return;
+
+      // Ensure session exists
+      if (!currentSessionId) {
+        log("No session selected, creating new one...");
+        currentSessionId = await createSession();
+        if (!currentSessionId) return;
+        loadSessions();
+      }
+
       try {
         micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
       } catch (e) {
@@ -103,7 +273,7 @@
           const idx = Math.floor(srcPos);
           const frac = srcPos - idx;
           const s0 = input[idx] || 0;
-          const s1 = input[idx+1] || s0;
+          const s1 = input[idx + 1] || s0;
           out[i] = s0 + (s1 - s0) * frac;
         }
         acc.push(out);
@@ -118,24 +288,28 @@
             let s = Math.max(-1, Math.min(1, merged[i]));
             int16[i] = s < 0 ? s * 32768 : s * 32767;
           }
-          log({event:'audio_chunk_sent', samples:int16.length}); ws.send(new Uint8Array(int16.buffer));
+          log({ event: 'audio_chunk_sent', samples: int16.length }); ws.send(new Uint8Array(int16.buffer));
         }
       };
       source.connect(processor);
       processor.connect(audioCtx.destination);
-      if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (_) {} }
+      if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (_) { } }
+
+      log({ event: 'user_id', id: userId, session_id: currentSessionId });
+
       const origin = (window.location.origin && window.location.origin.startsWith('http')) ? window.location.origin : 'http://localhost:8000';
       const url = new URL('/ws/voice', origin);
       url.protocol = (url.protocol === 'https:') ? 'wss:' : 'ws:';
+      url.searchParams.append('session_id', currentSessionId);
       ws = new WebSocket(url.href);
       ws.binaryType = 'arraybuffer';
-      ws.onopen = () => { statusEl.textContent = '已连接，开始推流'; log({event:'ws_open'}); };
-      // 发送初始化心跳，避免某些容器立即断开空闲连接
+      ws.onopen = () => { statusEl.textContent = '已连接，开始推流'; log({ event: 'ws_open' }); };
+      // 发送初始化心跳
       ws.addEventListener('open', () => {
-        try { ws.send(JSON.stringify({ cmd: 'init' })); } catch (_) {}
+        try { ws.send(JSON.stringify({ cmd: 'init' })); } catch (_) { }
       });
       ws.onclose = () => { statusEl.textContent = '连接关闭'; };
-      ws.onerror = () => { statusEl.textContent = '连接错误'; log({event:'ws_error'}); };
+      ws.onerror = () => { statusEl.textContent = '连接错误'; log({ event: 'ws_error' }); };
       ws.onmessage = (ev) => {
         if (typeof ev.data === 'string') {
           try {
@@ -144,6 +318,10 @@
               ttsSampleRate = o.rate;
             }
             log(o);
+            // Refresh session list if title updated or new message
+            if (o.event === 'llm_text' || o.event === 'tts_done') {
+              loadSessions();
+            }
           } catch (_) {
             log(ev.data);
           }
@@ -180,9 +358,10 @@
         const j = await r.json();
         log(j);
       } catch (e) {
-        log({event:'probe_error', detail:String(e)});
+        log({ event: 'probe_error', detail: String(e) });
       }
     };
   </script>
 </body>
+
 </html>
