@@ -184,7 +184,6 @@
       const sid = await createSession();
       if (sid) {
         selectSession(sid);
-        // Optionally auto-start? For now just select.
       }
     };
 
@@ -213,11 +212,9 @@
         node.connect(ctx.destination);
       }
       function pushPCM16(chunk, inRate = 16000) {
-        // convert int16 to float
         const int16 = new Int16Array(chunk.buffer, chunk.byteOffset, Math.floor(chunk.byteLength / 2));
         const f = new Float32Array(int16.length);
         for (let i = 0; i < int16.length; i++) f[i] = int16[i] / 32768;
-        // resample to ctx sampleRate
         const ratio = outRate / inRate;
         const outLen = Math.floor(f.length * ratio);
         const out = new Float32Array(outLen);
@@ -234,7 +231,10 @@
         merged.set(out, buffer.length);
         buffer = merged;
       }
-      return { init, pushPCM16 };
+      function reset() {
+        buffer = new Float32Array(0);
+      }
+      return { init, pushPCM16, reset };
     })();
 
     async function start() {
@@ -288,7 +288,7 @@
             let s = Math.max(-1, Math.min(1, merged[i]));
             int16[i] = s < 0 ? s * 32768 : s * 32767;
           }
-          log({ event: 'audio_chunk_sent', samples: int16.length }); ws.send(new Uint8Array(int16.buffer));
+          ws.send(new Uint8Array(int16.buffer));
         }
       };
       source.connect(processor);
@@ -298,13 +298,12 @@
       log({ event: 'user_id', id: userId, session_id: currentSessionId });
 
       const origin = (window.location.origin && window.location.origin.startsWith('http')) ? window.location.origin : 'http://localhost:8000';
-      const url = new URL('/ws/voice', origin);
-      url.protocol = (url.protocol === 'https:') ? 'wss:' : 'ws:';
-      url.searchParams.append('session_id', currentSessionId);
-      ws = new WebSocket(url.href);
+      const wsUrl = new URL('/ws/voice', origin);
+      wsUrl.protocol = (wsUrl.protocol === 'https:') ? 'wss:' : 'ws:';
+      wsUrl.searchParams.append('session_id', currentSessionId);
+      ws = new WebSocket(wsUrl.href);
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => { statusEl.textContent = '已连接，开始推流'; log({ event: 'ws_open' }); };
-      // 发送初始化心跳
       ws.addEventListener('open', () => {
         try { ws.send(JSON.stringify({ cmd: 'init' })); } catch (_) { }
       });
@@ -318,7 +317,6 @@
               ttsSampleRate = o.rate;
             }
             log(o);
-            // Refresh session list if title updated or new message
             if (o.event === 'llm_text' || o.event === 'tts_done') {
               loadSessions();
             }
@@ -343,6 +341,7 @@
       if (audioCtx) { audioCtx.close(); audioCtx = null; }
       if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
       if (ws) { ws.close(); ws = null; }
+      pcmPlayer.reset(); // Clear audio buffer to prevent stuttering
       startBtn.disabled = false;
       stopBtn.disabled = true;
       statusEl.textContent = '未连接';
@@ -352,9 +351,9 @@
     stopBtn.onclick = stop;
     document.getElementById('probeBtn').onclick = async () => {
       const origin = (window.location.origin && window.location.origin.startsWith('http')) ? window.location.origin : 'http://localhost:8000';
-      const url = new URL('/api/tts_probe', origin);
+      const probeUrl = new URL('/api/tts_probe', origin);
       try {
-        const r = await fetch(url.href);
+        const r = await fetch(probeUrl.href);
         const j = await r.json();
         log(j);
       } catch (e) {
