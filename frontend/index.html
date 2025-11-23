@@ -91,6 +91,16 @@
 
 <body>
   <div id="sidebar">
+    <div style="margin-bottom:10px; display:flex; flex-direction:column; gap:6px;">
+      <input id="username" placeholder="用户名" style="padding:6px;" />
+      <input id="password" placeholder="密码" type="password" style="padding:6px;" />
+      <div style="display:flex; gap:8px;">
+        <button id="loginBtn" style="flex:1;">登录</button>
+        <button id="registerBtn" style="flex:1;">注册</button>
+        <button id="logoutBtn" style="flex:1;">退出</button>
+      </div>
+      <div style="font-size:12px; color:#555;">当前用户：<span id="authUser">未登录</span></div>
+    </div>
     <button id="newChatBtn" style="width: 100%; margin-bottom: 10px;">+ 新对话</button>
     <div style="font-weight: bold; color: #666;">历史记录 (最近5条)</div>
     <ul id="sessionList"></ul>
@@ -113,6 +123,11 @@
     const statusEl = document.getElementById('status');
     const sessionListEl = document.getElementById('sessionList');
     const newChatBtn = document.getElementById('newChatBtn');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    const loginBtn = document.getElementById('loginBtn');
+    const registerBtn = document.getElementById('registerBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
 
     let ws = null;
     let audioCtx = null;
@@ -123,6 +138,8 @@
     let ttsSampleRate = 24000;
     let currentSessionId = null;
     let userId = localStorage.getItem('voice_user_id');
+    let token = localStorage.getItem('voice_token');
+    let authUserId = null;
 
     if (!userId) {
       userId = 'user_' + Math.random().toString(36).substring(2, 15);
@@ -134,7 +151,9 @@
     // Fetch and display sessions
     async function loadSessions() {
       try {
-        const res = await fetch(`/api/sessions?user_id=${userId}`);
+        const headers = token ? { Authorization: 'Bearer ' + token } : {};
+        const url = token ? `/api/sessions` : `/api/sessions?user_id=${userId}`;
+        const res = await fetch(url, { headers });
         const data = await res.json();
         renderSessions(data.sessions);
       } catch (e) {
@@ -167,10 +186,12 @@
 
     async function createSession() {
       try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
         const res = await fetch('/api/sessions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: userId })
+          headers,
+          body: token ? '{}' : JSON.stringify({ user_id: userId })
         });
         const data = await res.json();
         return data.session_id;
@@ -301,6 +322,7 @@
       const wsUrl = new URL('/ws/voice', origin);
       wsUrl.protocol = (wsUrl.protocol === 'https:') ? 'wss:' : 'ws:';
       wsUrl.searchParams.append('session_id', currentSessionId);
+      if (token) wsUrl.searchParams.append('token', token);
       ws = new WebSocket(wsUrl.href);
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => { statusEl.textContent = '已连接，开始推流'; log({ event: 'ws_open' }); };
@@ -360,6 +382,50 @@
         log({ event: 'probe_error', detail: String(e) });
       }
     };
+
+    async function refreshAuthState() {
+      const el = document.getElementById('authUser');
+      if (token) {
+        try {
+          const r = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
+          const j = await r.json();
+          if (j && j.ok) { authUserId = j.user_id; el.textContent = authUserId; }
+          else { authUserId = null; el.textContent = '未登录'; }
+        } catch (e) { authUserId = null; el.textContent = '未登录'; }
+      } else { authUserId = null; el.textContent = '未登录'; }
+    }
+
+    async function login() {
+      const u = usernameInput.value.trim();
+      const p = passwordInput.value;
+      if (!u || !p) { log('请输入用户名和密码'); return; }
+      try {
+        const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: u, password: p }) });
+        const j = await r.json();
+        if (j && j.ok) { token = j.token; localStorage.setItem('voice_token', token); log({ event: 'login_ok', userId: j.user_id }); await refreshAuthState(); loadSessions(); }
+        else { log({ event: 'login_error' }); }
+      } catch (e) { log({ event: 'login_error', detail: String(e) }); }
+    }
+
+    async function register() {
+      const u = usernameInput.value.trim();
+      const p = passwordInput.value;
+      if (!u || !p) { log('请输入用户名和密码'); return; }
+      try {
+        const r = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: u, password: p }) });
+        const j = await r.json();
+        if (j && j.ok) { token = j.token; localStorage.setItem('voice_token', token); log({ event: 'register_ok', userId: j.user_id }); await refreshAuthState(); loadSessions(); }
+        else { log({ event: 'register_error' }); }
+      } catch (e) { log({ event: 'register_error', detail: String(e) }); }
+    }
+
+    function logout() {
+      token = null; localStorage.removeItem('voice_token'); authUserId = null; log({ event: 'logout_ok' }); refreshAuthState(); loadSessions(); }
+
+    loginBtn.onclick = login;
+    registerBtn.onclick = register;
+    logoutBtn.onclick = logout;
+    refreshAuthState();
   </script>
 </body>
 

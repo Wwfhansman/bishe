@@ -3,7 +3,7 @@ import threading
 import json
 import re
 import time
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -11,6 +11,7 @@ from ..stt.asr_client import ASRClient
 from ..llm.llm_client import LLMClient
 from ..tts.tts_client import TTSClient
 from ..config import TTS_VOICE_TYPE, GREETING_TEXT, LLM_SYSTEM_PROMPT
+from ..config import AUTH_JWT_SECRET, AUTH_JWT_EXPIRES, WECHAT_APPID, WECHAT_SECRET
 from .. import database
 
 app = FastAPI()
@@ -22,16 +23,29 @@ async def startup_event():
     database.init_db()
 
 class CreateSessionRequest(BaseModel):
-    user_id: str
+    user_id: str | None = None
 
 @app.post("/api/sessions")
-async def create_session_endpoint(req: CreateSessionRequest):
-    session_id = database.create_session(req.user_id)
+async def create_session_endpoint(req: CreateSessionRequest, request: Request):
+    auth = request.headers.get("Authorization")
+    user_id = None
+    if isinstance(auth, str) and auth.startswith("Bearer "):
+        tok = auth.split(" ", 1)[1]
+        user_id = _jwt_user(tok)
+    if not user_id and isinstance(req.user_id, str):
+        user_id = req.user_id
+    session_id = database.create_session(user_id)
     return {"session_id": session_id}
 
 @app.get("/api/sessions")
-async def get_sessions_endpoint(user_id: str):
-    sessions = database.get_user_sessions(user_id)
+async def get_sessions_endpoint(request: Request, user_id: str | None = None):
+    uid = user_id
+    if not uid:
+        auth = request.headers.get("Authorization")
+        if isinstance(auth, str) and auth.startswith("Bearer "):
+            tok = auth.split(" ", 1)[1]
+            uid = _jwt_user(tok)
+    sessions = database.get_user_sessions(uid)
     return {"sessions": sessions}
 
 @app.get("/")
@@ -45,7 +59,7 @@ async def root():
     """)
 
 @app.websocket("/ws/voice")
-async def ws_voice(websocket: WebSocket, session_id: str):
+async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = None):
     await websocket.accept()
     loop = asyncio.get_running_loop()
     asr = ASRClient()
@@ -54,6 +68,10 @@ async def ws_voice(websocket: WebSocket, session_id: str):
     tts_lock = threading.Lock()
     recv_bytes = 0
     recv_chunks = 0
+
+    uid = None
+    if isinstance(token, str):
+        uid = _jwt_user(token)
 
     # Load history
     history = database.get_session_history(session_id, limit=10)
@@ -259,3 +277,99 @@ async def tts_probe(text: str = "你好，这是一次测试合成。"):
     except Exception:
         pass
     return {"ok": True, "status": status, "logid": logid, "chunk_count": count, "total_bytes": total, "first_chunk_samples": first_samples}
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class WechatLoginRequest(BaseModel):
+    code: str
+
+def _b64url(b: bytes) -> str:
+    import base64
+    return base64.urlsafe_b64encode(b).decode().rstrip("=")
+
+def _jwt_sign(payload: dict) -> str:
+    import json, hmac, hashlib, time
+    header = {"alg": "HS256", "typ": "JWT"}
+    now = int(time.time())
+    if "exp" not in payload:
+        payload = {**payload, "exp": now + AUTH_JWT_EXPIRES}
+    h64 = _b64url(json.dumps(header, separators=(",", ":")).encode())
+    p64 = _b64url(json.dumps(payload, separators=(",", ":")).encode())
+    sig = hmac.new(AUTH_JWT_SECRET.encode(), (h64 + "." + p64).encode(), hashlib.sha256).digest()
+    return h64 + "." + p64 + "." + _b64url(sig)
+
+def _jwt_user(token: str) -> str | None:
+    import base64, hashlib, hmac, json, time
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return None
+        h64, p64, s64 = parts
+        sig = base64.urlsafe_b64decode(s64 + "=" * (-len(s64) % 4))
+        exp_sig = hmac.new(AUTH_JWT_SECRET.encode(), (h64 + "." + p64).encode(), hashlib.sha256).digest()
+        if not hmac.compare_digest(sig, exp_sig):
+            return None
+        payload = json.loads(base64.urlsafe_b64decode(p64 + "=" * (-len(p64) % 4)))
+        if int(payload.get("exp", 0)) < int(time.time()):
+            return None
+        return payload.get("sub")
+    except Exception:
+        return None
+
+@app.post("/api/auth/register")
+async def auth_register(req: RegisterRequest):
+    uid = database.create_user(req.username, req.password)
+    if not uid:
+        return {"ok": False}
+    tok = _jwt_sign({"sub": uid})
+    return {"ok": True, "token": tok, "user_id": uid}
+
+@app.post("/api/auth/login")
+async def auth_login(req: LoginRequest):
+    uid = database.validate_user(req.username, req.password)
+    if not uid:
+        return {"ok": False}
+    tok = _jwt_sign({"sub": uid})
+    return {"ok": True, "token": tok, "user_id": uid}
+
+@app.post("/api/auth/wechat_login")
+async def auth_wechat(req: WechatLoginRequest):
+    import urllib.request, urllib.parse, json
+    if not WECHAT_APPID or not WECHAT_SECRET:
+        return {"ok": False}
+    qs = urllib.parse.urlencode({
+        "appid": WECHAT_APPID,
+        "secret": WECHAT_SECRET,
+        "js_code": req.code,
+        "grant_type": "authorization_code",
+    })
+    try:
+        with urllib.request.urlopen("https://api.weixin.qq.com/sns/jscode2session?" + qs, timeout=5) as r:
+            j = json.loads(r.read().decode())
+    except Exception:
+        return {"ok": False}
+    openid = j.get("openid")
+    if not isinstance(openid, str):
+        return {"ok": False}
+    uid = database.ensure_user_wechat(openid)
+    if not uid:
+        return {"ok": False}
+    tok = _jwt_sign({"sub": uid})
+    return {"ok": True, "token": tok, "user_id": uid}
+
+@app.get("/api/me")
+async def api_me(request: Request):
+    auth = request.headers.get("Authorization")
+    if not isinstance(auth, str) or not auth.startswith("Bearer "):
+        return {"ok": False}
+    tok = auth.split(" ", 1)[1]
+    uid = _jwt_user(tok)
+    if not uid:
+        return {"ok": False}
+    return {"ok": True, "user_id": uid}

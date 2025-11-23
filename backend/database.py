@@ -12,6 +12,21 @@ def init_db():
     # Enable foreign keys
     c.execute("PRAGMA foreign_keys = ON;")
     
+    # Create users table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT UNIQUE,
+            password_hash TEXT,
+            wechat_openid TEXT UNIQUE,
+            created_at REAL,
+            updated_at REAL,
+            last_login_at REAL
+        )
+    ''')
+    c.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_users_wechat ON users(wechat_openid)")
+    
     # Create sessions table
     c.execute('''
         CREATE TABLE IF NOT EXISTS sessions (
@@ -114,3 +129,73 @@ def clear_history(session_id: str):
     c.execute("DELETE FROM conversations WHERE session_id = ?", (session_id,))
     conn.commit()
     conn.close()
+
+def _hash_password(pw: str) -> str:
+    import os, hashlib, base64
+    salt = os.urandom(16)
+    h = hashlib.sha256(salt + pw.encode()).digest()
+    return base64.urlsafe_b64encode(salt + h).decode()
+
+def _verify_password(stored: str, pw: str) -> bool:
+    import hashlib, base64
+    try:
+        b = base64.urlsafe_b64decode(stored.encode())
+        salt = b[:16]
+        h = b[16:]
+        return hashlib.sha256(salt + pw.encode()).digest() == h
+    except Exception:
+        return False
+
+def create_user(username: str, password: str) -> Optional[str]:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    now = time.time()
+    try:
+        user_id = str(uuid.uuid4())
+        ph = _hash_password(password)
+        c.execute(
+            "INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, username, ph, now, now),
+        )
+        conn.commit()
+        return user_id
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+def validate_user(username: str, password: str) -> Optional[str]:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT id, password_hash FROM users WHERE username = ?", (username,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    if _verify_password(row["password_hash"], password):
+        return row["id"]
+    return None
+
+def ensure_user_wechat(openid: str) -> Optional[str]:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT id FROM users WHERE wechat_openid = ?", (openid,))
+    row = c.fetchone()
+    if row:
+        conn.close()
+        return row["id"]
+    try:
+        uid = str(uuid.uuid4())
+        now = time.time()
+        c.execute(
+            "INSERT INTO users (id, wechat_openid, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (uid, openid, now, now),
+        )
+        conn.commit()
+        return uid
+    except Exception:
+        return None
+    finally:
+        conn.close()
