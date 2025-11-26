@@ -59,3 +59,8 @@ AUTH_JWT_SECRET = env("AUTH_JWT_SECRET", "dev-secret")
 AUTH_JWT_EXPIRES = int(env("AUTH_JWT_EXPIRES", "604800"))
 WECHAT_APPID = env("WECHAT_APPID")
 WECHAT_SECRET = env("WECHAT_SECRET")
+
+# RAG Config
+RAG_DB_PATH = env("RAG_DB_PATH", "backend/rag/chroma_db")
+RAG_COLLECTION = env("RAG_COLLECTION", "kb_main")
+HF_ENDPOINT = env("HF_ENDPOINT", "https://hf-mirror.com")

@@ -3,6 +3,11 @@ import threading
 import json
 import re
 import time
+try:
+    import webrtcvad as _webrtcvad
+except Exception:
+    _webrtcvad = None
+import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,6 +16,7 @@ from ..stt.asr_client import ASRClient
 from ..llm.llm_client import LLMClient
 from ..tts.tts_client import TTSClient
 from ..config import TTS_VOICE_TYPE, GREETING_TEXT, LLM_SYSTEM_PROMPT
+from ..config import RATE as ASR_RATE
 from ..config import AUTH_JWT_SECRET, AUTH_JWT_EXPIRES, WECHAT_APPID, WECHAT_SECRET
 from .. import database
 
@@ -66,6 +72,8 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
     llm = LLMClient()
     out_audio_q: asyncio.Queue[bytes] = asyncio.Queue()
     tts_lock = threading.Lock()
+    send_enabled = True
+    current_tts_client = None
     recv_bytes = 0
     recv_chunks = 0
 
@@ -85,6 +93,67 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
 
     def put_audio(b: bytes):
         asyncio.run_coroutine_threadsafe(out_audio_q.put(b), loop)
+
+    use_native_vad = _webrtcvad is not None
+    vad = _webrtcvad.Vad(2) if use_native_vad else None
+    vad_enabled = True
+    min_speech_ms = 500
+    start_frames = 6
+    silence_end_frames = 10
+    frame_ms = 20
+    frame_bytes = int(ASR_RATE * frame_ms / 1000) * 2
+    vad_buf = b""
+    speaking_frames = 0
+    silence_frames = 0
+    pausepending = False
+    interrupt_confirmed = False
+    fallback_sensitivity = 2
+    noise_floor = 500.0
+    def energy_is_speech(fb: bytes) -> bool:
+        a = np.frombuffer(fb, dtype=np.int16)
+        e = float(np.mean(np.abs(a)))
+        t = 4.0 if fallback_sensitivity == 0 else 3.0 if fallback_sensitivity == 1 else 2.5 if fallback_sensitivity == 2 else 2.0
+        return e > noise_floor * t
+
+    def clear_out_audio_q():
+        while True:
+            try:
+                out_audio_q.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
+    async def send_event(obj: dict):
+        try:
+            await websocket.send_text(json.dumps(obj, ensure_ascii=False))
+        except Exception:
+            pass
+
+    def interrupt_now():
+        nonlocal send_enabled, pausepending
+        send_enabled = False
+        clear_out_audio_q()
+        asyncio.run_coroutine_threadsafe(send_event({"event": "tts_reset"}), loop)
+        pausepending = True
+
+    def confirm_interrupt():
+        nonlocal interrupt_confirmed, current_tts_client
+        interrupt_confirmed = True
+        with tts_lock:
+            c = current_tts_client
+            try:
+                if c:
+                    c.close()
+            except Exception:
+                pass
+            current_tts_client = None
+        asyncio.run_coroutine_threadsafe(send_event({"event": "tts_interrupted"}), loop)
+
+    def resume_play():
+        nonlocal send_enabled, pausepending, speaking_frames, silence_frames
+        send_enabled = True
+        pausepending = False
+        speaking_frames = 0
+        silence_frames = 0
 
     seen_keys = set()
     def normalize_text(s: str):
@@ -108,8 +177,26 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
         
         reply = None
         try:
-            # Pass history to LLM
-            reply = llm.chat(s, system=LLM_SYSTEM_PROMPT, history=history[:-1])
+            rag_text = None
+            try:
+                from ..rag.retriever import best_text
+            except Exception:
+                try:
+                    import sys
+                    from pathlib import Path
+                    sys.path.append(str(Path(__file__).resolve().parents[1]))
+                    from rag.retriever import best_text
+                except Exception:
+                    best_text = None
+            if best_text is not None:
+                try:
+                    rag_text = best_text(s, 6, 1200)
+                except Exception:
+                    rag_text = None
+            sys_prompt = LLM_SYSTEM_PROMPT
+            if rag_text:
+                sys_prompt = sys_prompt + "\n" + rag_text
+            reply = llm.chat(s, system=sys_prompt, history=history[:-1])
             asyncio.run_coroutine_threadsafe(send_text_obj({"event": "llm_text", "text": reply}), loop)
             
             # Save Assistant Message
@@ -119,9 +206,14 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
             reply = s
             asyncio.run_coroutine_threadsafe(send_text_obj({"event": "llm_error", "fallback_text": reply}), loop)
         
-        # TTS Logic
         with tts_lock:
             try:
+                nonlocal current_tts_client, send_enabled, pausepending, interrupt_confirmed, speaking_frames, silence_frames, vad_buf
+                pausepending = False
+                interrupt_confirmed = False
+                speaking_frames = 0
+                silence_frames = 0
+                vad_buf = b""
                 client = TTSClient(voice_type=TTS_VOICE_TYPE)
                 client.connect()
                 client.submit_text(reply)
@@ -133,9 +225,15 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
                     put_audio(b)
                     if count % 5 == 0:
                         asyncio.run_coroutine_threadsafe(send_text_obj({"event": "tts_chunk", "count": count}), loop)
+                current_tts_client = client
+                send_enabled = True
                 client.stream_chunks(on_chunk)
                 asyncio.run_coroutine_threadsafe(send_text_obj({"event": "tts_done", "count": count}), loop)
-                client.close()
+                try:
+                    client.close()
+                except Exception:
+                    pass
+                current_tts_client = None
             except Exception as e:
                 try:
                     msg = str(e)
@@ -202,7 +300,8 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
         try:
             while True:
                 chunk = await out_audio_q.get()
-                await websocket.send_bytes(chunk)
+                if send_enabled:
+                    await websocket.send_bytes(chunk)
         except WebSocketDisconnect:
             return
         except Exception:
@@ -215,6 +314,33 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
             if msg.get("type") == "websocket.receive":
                 if msg.get("bytes") is not None:
                     bs = msg["bytes"]
+                    if vad_enabled:
+                        vad_buf += bs
+                        while len(vad_buf) >= frame_bytes:
+                            fb = vad_buf[:frame_bytes]
+                            vad_buf = vad_buf[frame_bytes:]
+                            v = False
+                            try:
+                                v = vad.is_speech(fb, ASR_RATE) if use_native_vad else energy_is_speech(fb)
+                            except Exception:
+                                v = False
+                            if v:
+                                speaking_frames += 1
+                                silence_frames = 0
+                                if not pausepending and speaking_frames >= start_frames:
+                                    interrupt_now()
+                                if pausepending and not interrupt_confirmed:
+                                    if speaking_frames * frame_ms >= min_speech_ms:
+                                        confirm_interrupt()
+                            else:
+                                silence_frames += 1
+                                speaking_frames = 0
+                                if not use_native_vad:
+                                    a = np.frombuffer(fb, dtype=np.int16)
+                                    e = float(np.mean(np.abs(a)))
+                                    noise_floor = noise_floor * 0.95 + e * 0.05
+                                if pausepending and not interrupt_confirmed and silence_frames >= silence_end_frames:
+                                    resume_play()
                     recv_bytes += len(bs)
                     recv_chunks += 1
                     if recv_chunks % 10 == 0:
@@ -225,6 +351,33 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
                         data = json.loads(msg["text"])
                         if data.get("cmd") == "stop":
                             asr.finish_stream()
+                        elif data.get("cmd") == "interrupt_config":
+                            e = data.get("enable")
+                            s = data.get("sensitivity")
+                            m = data.get("min_speech_ms")
+                            if isinstance(e, bool):
+                                vad_enabled = e
+                            if isinstance(s, int) and 0 <= s <= 3:
+                                if use_native_vad:
+                                    try:
+                                        vad.set_mode(s)
+                                    except Exception:
+                                        pass
+                                else:
+                                    fallback_sensitivity = s
+                            if isinstance(m, int) and m > 0:
+                                min_speech_ms = m
+                            await send_text_obj({"event": "interrupt_config_ok"})
+                        elif data.get("cmd") == "interrupt_status":
+                            st = {
+                                "event": "interrupt_status",
+                                "enable": vad_enabled,
+                                "min_speech_ms": min_speech_ms,
+                                "pausepending": pausepending,
+                                "confirmed": interrupt_confirmed,
+                                "send_enabled": send_enabled,
+                            }
+                            await send_text_obj(st)
                     except Exception:
                         pass
             elif msg.get("type") == "websocket.disconnect":
@@ -277,6 +430,18 @@ async def tts_probe(text: str = "你好，这是一次测试合成。"):
     except Exception:
         pass
     return {"ok": True, "status": status, "logid": logid, "chunk_count": count, "total_bytes": total, "first_chunk_samples": first_samples}
+
+@app.get("/api/rag_query")
+async def rag_query(q: str, k: int = 5):
+    try:
+        from ..rag.retriever import search
+    except Exception:
+        import sys
+        from pathlib import Path
+        sys.path.append(str(Path(__file__).resolve().parents[1]))
+        from rag.retriever import search
+    r = search(q, k)
+    return r
 
 class RegisterRequest(BaseModel):
     username: str

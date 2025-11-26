@@ -32,34 +32,64 @@
 
 ## 3. RAG 增强检索模块 (Retrieval-Augmented Generation)
 
-### 3.1 架构选型
-*   **向量数据库**：**ChromaDB**
-    *   **理由**：开源、轻量、支持本地持久化存储，Python 生态友好，无需复杂的服务器端配置。
-*   **Embedding 模型**：**火山引擎 (Volcengine) Embedding API**
-    *   **理由**：
-        *   **节省算力**：本地运行 Embedding 模型（如 BERT/m3e）会消耗大量 CPU/RAM，可能导致 2G 内存的服务器卡顿。使用云端 API 可将负载卸载到云端。
-        *   **生态统一**：与现有的 ASR 和 LLM 同属火山引擎生态，便于管理。
+### 3.1 架构选型（ChromaDB 持久化 + 本地中文小模型）
+- 向量化模型：`bge-small-zh v1.5`（384 维），优先通过 `fastembed`（ONNX，CPU 友好、内存占用低）。
+- 向量数据库：`ChromaDB` 持久化客户端，路径例如 `backend/rag/chroma_db/`。集合名建议使用 `kb`，距离度量配置 `metadata={'hnsw:space': 'cosine'}`。
+- 运行方式：离线在本地批量向量化知识库并将“文本 + 向量 + 元信息”一次性写入 Chroma；线上仅对 Query 在本地向量化，在 Chroma 中进行 Top-K 检索。
 
-### 3.2 知识库构建流程
-1.  **数据源**：收集烹饪相关的文本数据（菜谱、技巧、营养知识）。
-2.  **切片 (Chunking)**：将长文本按语义或字符数切分为短片段（Chunk）。
-3.  **向量化 (Embedding)**：调用火山引擎 API 将 Text Chunk 转换为 Vector。
-4.  **存储**：将 Vector 和原始 Text 存入 ChromaDB。
+### 3.2 离线构建流程（在本地）
+1. 数据收集：整理烹饪相关文本（菜谱、技巧、营养、食材百科），保留来源与主题标记。
+2. 切片策略：按 512–1024 汉字或句子边界切分，去除噪声与重复；为每个 Chunk 生成唯一 `id` 与 `tags`。
+3. 向量化：加载本地嵌入模型，批量生成 384 维 `float32` 向量。
+4. 写入 Chroma：创建持久化客户端与集合，将 `documents/ids/metadatas/embeddings` 一次性加入集合；目录如 `backend/rag/chroma_db/`。
+5. 验证与评估：抽样检索检查相关性与覆盖率，记录评估日志与版本号（如 `kb/2025-11-26`）。
 
-### 3.3 检索与生成流程
-1.  **用户提问**：用户语音转文字得到 Query。
-2.  **Query 向量化**：调用火山引擎 API 将 Query 转换为 Vector。
-3.  **相似度搜索**：在 ChromaDB 中检索与 Query Vector 最相似的 Top-K 个知识片段。
-4.  **Prompt 组装**：
-    ```text
-    系统提示词 + 
-    [参考知识库]：
-    ... (Top-K 片段) ...
-    [用户问题]：
-    ...
-    ```
-5.  **生成回复**：LLM 基于增强后的 Prompt 生成回答。
+示例代码（离线构建到 Chroma）：
+```python
+# 安装：pip install chromadb fastembed onnxruntime numpy tqdm
+import chromadb, json, numpy as np
+from fastembed import TextEmbedding
+from tqdm import tqdm
+
+chunks = load_chunks_from_folder('data/')  # 返回 [{'id': 'xxx', 'text': '...', 'tags': ['...'], 'source': '...'}]
+texts = [c['text'] for c in chunks]
+ids = [c['id'] for c in chunks]
+metas = [{"source": c.get("source"), "tags": c.get("tags", [])} for c in chunks]
+
+embedding = TextEmbedding(model_name="bge-small-zh-v1.5")
+vectors = list(embedding.embed(texts))  # List[List[float]] 长度=384
+
+client = chromadb.PersistentClient(path="backend/rag/chroma_db")
+coll = client.get_or_create_collection(name="kb", metadata={"hnsw:space": "cosine"})
+coll.add(documents=texts, ids=ids, metadatas=metas, embeddings=vectors)
+```
+
+### 3.3 在线查询流程（服务器 2核2G）
+- 启动加载：服务启动时创建 `chromadb.PersistentClient(path="backend/rag/chroma_db")` 并获取集合 `kb`；预热本地嵌入模型单例。
+- 每次提问：
+  - 使用本地嵌入模型对 ASR 文本生成 384 维向量。
+  - 调用 `coll.query(query_embeddings=[vec], n_results=5)` 获取 Top-K。
+  - 取出 `documents/metadatas` 组装 Prompt（系统提示词 + Top-K 摘要 + 用户问题），调用 LLM 生成回复。
+- 并发与资源：
+  - 限制嵌入并发（如 4），单例模型避免重复加载；对热门 Query 做向量缓存 5–10 分钟。
+  - 如果数据规模较大，合理配置集合与分片（多个集合按主题拆分），分批加载与查询。
+
+### 3.4 参数与性能建议
+- 模型：`bge-small-zh v1.5`（fastembed/ONNX），权重约 20–30MB；加载后内存峰值在 200–300MB（含运行时）。
+- Chroma 集合：`metadata={'hnsw:space':'cosine'}`，Top-K=5；对于较大规模数据，建议拆分多个集合（菜谱/技巧/营养）。
+- 延迟：Query 向量化 20–50ms；Chroma 查询 10–30ms；总体<120ms（不含 LLM）。
+- 规模：50k Chunk 在 2GB 内存内可运行；如更大，分集合与按主题检索可控资源占用。
+
+### 3.5 版本管理与部署
+- 产物版本：为 `backend/rag/chroma_db/` 标注版本号与时间戳（如 `backend/rag/chroma_db/kb_2025-11-26/`）。
+- 回滚策略：保留上一个版本目录，出现问题时切换配置指针或软链接到稳定版本。
+- 部署流程：
+  - 本地向量化并写入 Chroma 持久目录 → 打包上传到服务器指定路径 → 服务重启并加载集合。
+  - 启动时进行集合一致性校验（元素数量与元数据条数一致）。
 
 ## 4. 性能优化策略 (Performance)
-*   **异步并发**：LLM 请求和 RAG 检索均采用异步或线程池执行，避免阻塞主线程导致音频卡顿。
-*   **流式输出**：LLM 生成与 TTS 合成并行流水线工作，首字生成即开始合成音频，降低首字延迟 (TTFT)。
+- 线程池与限流：对 Query 向量化与索引检索分别设置并发上限，避免 CPU 抢占导致端到端延迟上升。
+- 模型预热：服务启动时完成模型初始化，避免首请求冷启动抖动；若内存紧张，优先选择 ONNX/fastembed。
+- 索引预加载：启动阶段完成索引加载并设置 `ef`，避免运行时频繁切换参数。
+- 缓存：对热门 Query 做向量缓存与 Top-K 结果缓存（短 TTL），进一步降低负载。
+- 降级策略：在高负载或内存不足时降低 Top-K、调低 `ef`，或启用分片索引。

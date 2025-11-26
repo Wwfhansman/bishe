@@ -342,6 +342,9 @@
             if (o.event === 'llm_text' || o.event === 'tts_done') {
               loadSessions();
             }
+            if (o.event === 'tts_reset') {
+              pcmPlayer.reset();
+            }
           } catch (_) {
             log(ev.data);
           }

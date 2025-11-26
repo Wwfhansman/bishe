@@ -5,3 +5,4 @@ numpy
 requests
 fastapi
 uvicorn
+webrtcvad
