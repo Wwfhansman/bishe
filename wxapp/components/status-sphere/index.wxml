@@ -1,0 +1,11 @@
+<view class="sphere-container {{status}}" bindtap="handleTap">
+  <!-- Tech Rings for Visual Effects -->
+  <view class="tech-ring ring-3"></view>
+  <view class="tech-ring ring-2"></view>
+  <view class="tech-ring ring-1"></view>
+  
+  <!-- Core Sphere -->
+  <view class="sphere-core {{status}}">
+    <view class="sphere-inner"></view>
+  </view>
+</view>

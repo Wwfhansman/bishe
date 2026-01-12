@@ -345,7 +345,14 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
                     recv_chunks += 1
                     if recv_chunks % 10 == 0:
                         await send_text_obj({"event": "audio_stats", "chunks": recv_chunks, "bytes": recv_bytes})
-                    asr.send_audio_chunk(bs)
+                    try:
+                        asr.send_audio_chunk(bs)
+                    except Exception as e:
+                        try:
+                            await send_text_obj({"event": "error", "stage": "asr_send", "detail": str(e)})
+                        except Exception:
+                            pass
+                        break
                 elif msg.get("text") is not None:
                     try:
                         data = json.loads(msg["text"])
@@ -384,8 +391,11 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
                 break
     except WebSocketDisconnect:
         pass
-    except Exception:
-        await send_text_obj({"event": "error", "stage": "ws_loop"})
+    except Exception as e:
+        try:
+            await send_text_obj({"event": "error", "stage": "ws_loop", "detail": str(e)})
+        except Exception:
+            pass
     try:
         asr.finish_stream()
     except Exception:
@@ -505,9 +515,18 @@ async def auth_login(req: LoginRequest):
 
 @app.post("/api/auth/wechat_login")
 async def auth_wechat(req: WechatLoginRequest):
+    # Mock Login for Development
+    if req.code == "mock_login_code":
+        uid = database.ensure_user_wechat("mock_openid_123456")
+        if not uid:
+            return {"ok": False, "error": "db_error"}
+        tok = _jwt_sign({"sub": uid})
+        return {"ok": True, "token": tok, "user_id": uid, "is_mock": True}
+
     import urllib.request, urllib.parse, json
     if not WECHAT_APPID or not WECHAT_SECRET:
-        return {"ok": False}
+        return {"ok": False, "error": "missing_config", "detail": "WECHAT_APPID or WECHAT_SECRET not set in env"}
+    
     qs = urllib.parse.urlencode({
         "appid": WECHAT_APPID,
         "secret": WECHAT_SECRET,
@@ -517,14 +536,16 @@ async def auth_wechat(req: WechatLoginRequest):
     try:
         with urllib.request.urlopen("https://api.weixin.qq.com/sns/jscode2session?" + qs, timeout=5) as r:
             j = json.loads(r.read().decode())
-    except Exception:
-        return {"ok": False}
+    except Exception as e:
+        return {"ok": False, "error": "network_error", "detail": str(e)}
+    
     openid = j.get("openid")
     if not isinstance(openid, str):
-        return {"ok": False}
+        return {"ok": False, "error": "upstream_error", "upstream_response": j}
+        
     uid = database.ensure_user_wechat(openid)
     if not uid:
-        return {"ok": False}
+        return {"ok": False, "error": "db_error"}
     tok = _jwt_sign({"sub": uid})
     return {"ok": True, "token": tok, "user_id": uid}
 

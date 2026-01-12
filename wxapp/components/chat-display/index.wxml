@@ -1,0 +1,6 @@
+<view class="chat-container">
+  <view class="message-wrapper {{currentRole === 'user' ? 'user' : 'ai'}} {{animating ? 'fade-in' : ''}}">
+    <text class="role-label">{{currentRole === 'user' ? 'You' : 'AI'}}</text>
+    <text class="message-text">{{text}}</text>
+  </view>
+</view>

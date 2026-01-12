@@ -1,0 +1,75 @@
+/** app.wxss **/
+page {
+  /* Apple Design System - Light Theme Colors */
+  --bg-color: #F5F5F7; /* Light gray background */
+  --card-bg: rgba(255, 255, 255, 0.8); /* Glassmorphism card background */
+  --text-primary: #1D1D1F; /* Almost black for primary text */
+  --text-secondary: #86868B; /* Gray for secondary text */
+  --accent-color: #007AFF; /* Apple Blue for interactive elements */
+  --accent-gradient: linear-gradient(135deg, #007AFF, #5856D6); /* Blue to Purple gradient for tech feel */
+  --danger-color: #FF3B30;
+  --success-color: #34C759;
+  
+  /* Shadows */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08);
+  
+  /* Spacing */
+  --spacing-xs: 8rpx;
+  --spacing-sm: 16rpx;
+  --spacing-md: 24rpx;
+  --spacing-lg: 32rpx;
+  --spacing-xl: 48rpx;
+
+  /* Typography */
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Segoe UI, Arial, Roboto, 'PingFang SC', 'miui', 'Hiragino Sans GB', 'Microsoft Yahei', sans-serif;
+  font-size: 32rpx;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background-color: var(--bg-color);
+  
+  /* Safe Area */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.container {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+}
+
+/* Utility Classes */
+.glass-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 24rpx;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: var(--shadow-sm);
+}
+
+.text-title {
+  font-size: 40rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.text-subtitle {
+  font-size: 28rpx;
+  color: var(--text-secondary);
+}
+
+.flex-center {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.hover-effect {
+  opacity: 0.7;
+  transform: scale(0.98);
+  transition: all 0.2s ease;
+}

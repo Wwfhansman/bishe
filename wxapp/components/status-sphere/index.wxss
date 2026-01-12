@@ -1,0 +1,170 @@
+/* components/status-sphere/index.wxss */
+.sphere-container {
+  position: relative;
+  width: 480rpx;
+  height: 480rpx;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Core Sphere - The solid center */
+.sphere-core {
+  width: 200rpx;
+  height: 200rpx;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 
+    inset -10rpx -10rpx 20rpx rgba(174, 174, 192, 0.2),
+    inset 10rpx 10rpx 20rpx #ffffff,
+    0 10rpx 40rpx rgba(0, 0, 0, 0.1);
+  position: relative;
+  z-index: 20;
+  transition: all 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* Inner Glow - Represents the AI 'Soul' */
+.sphere-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,1), rgba(230,230,250,0.5));
+  opacity: 0.8;
+}
+
+/* Tech Rings - Rotating elements for 'Processing' and 'Listening' */
+.tech-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2rpx solid rgba(0, 122, 255, 0.1);
+  box-sizing: border-box;
+  transition: all 0.5s ease;
+  pointer-events: none;
+}
+
+.ring-1 { width: 240rpx; height: 240rpx; z-index: 15; border-color: rgba(0, 122, 255, 0.2); }
+.ring-2 { width: 320rpx; height: 320rpx; z-index: 10; border-style: dashed; }
+.ring-3 { width: 400rpx; height: 400rpx; z-index: 5; opacity: 0.5; }
+
+/* States */
+
+/* IDLE: Gentle Breathing */
+.sphere-core.idle {
+  transform: scale(1);
+  box-shadow: 0 10rpx 40rpx rgba(0, 0, 0, 0.1);
+}
+.idle .ring-1 { animation: breathe-ring 4s infinite ease-in-out; }
+.idle .ring-2 { animation: rotate-slow 20s linear infinite; opacity: 0.3; }
+.idle .ring-3 { opacity: 0.1; }
+
+/* LISTENING: Active, expanding, blue glow */
+.sphere-core.listening {
+  transform: scale(1.1);
+  background: #ffffff;
+  box-shadow: 0 0 60rpx rgba(0, 122, 255, 0.6);
+}
+.listening .sphere-inner {
+  background: radial-gradient(circle, #007AFF, #5856D6);
+  opacity: 0.1; /* Subtle tint */
+}
+.listening .ring-1 {
+  border-color: rgba(0, 122, 255, 0.6);
+  animation: pulse-ring 1.5s infinite ease-out;
+}
+.listening .ring-2 {
+  border-color: rgba(88, 86, 214, 0.4);
+  animation: rotate-fast 4s linear infinite;
+}
+.listening .ring-3 {
+  border-color: rgba(0, 122, 255, 0.2);
+  transform: scale(1.1);
+}
+
+/* PROCESSING: Fast rotation, computing feel */
+.sphere-core.processing {
+  transform: scale(0.95);
+  box-shadow: 0 0 30rpx rgba(88, 86, 214, 0.8);
+}
+.processing .sphere-inner {
+  background: radial-gradient(circle, #5856D6, #AF52DE);
+  animation: inner-pulse 0.5s infinite alternate;
+}
+.processing .ring-1 {
+  border-top-color: #5856D6;
+  border-bottom-color: transparent;
+  border-left-color: #5856D6;
+  border-right-color: transparent;
+  animation: spin 1s linear infinite;
+}
+.processing .ring-2 {
+  border-style: solid;
+  border-width: 4rpx;
+  border-color: transparent;
+  border-top-color: rgba(0, 122, 255, 0.5);
+  animation: spin-reverse 1.5s linear infinite;
+}
+
+/* SPEAKING: Organic waveform simulation */
+.sphere-core.speaking {
+  animation: speak-bounce 0.5s infinite ease-in-out alternate;
+  box-shadow: 0 0 50rpx rgba(52, 199, 89, 0.5);
+}
+.speaking .sphere-inner {
+  background: radial-gradient(circle, #34C759, #30B0C7);
+}
+.speaking .ring-1, .speaking .ring-2, .speaking .ring-3 {
+  border-color: rgba(52, 199, 89, 0.3);
+  animation: ripple-out 1s infinite ease-out;
+}
+.speaking .ring-2 { animation-delay: 0.3s; }
+.speaking .ring-3 { animation-delay: 0.6s; }
+
+
+/* Animations */
+@keyframes breathe-ring {
+  0%, 100% { transform: scale(1); opacity: 0.5; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+}
+
+@keyframes rotate-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes rotate-fast {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spin-reverse {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 0.8; border-width: 4rpx; }
+  100% { transform: scale(1.5); opacity: 0; border-width: 0; }
+}
+
+@keyframes inner-pulse {
+  from { opacity: 0.5; }
+  to { opacity: 0.9; }
+}
+
+@keyframes speak-bounce {
+  from { transform: scale(1); }
+  to { transform: scale(1.05); }
+}
+
+@keyframes ripple-out {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(1.4); opacity: 0; }
+}

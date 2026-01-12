@@ -1,1 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Environment Variables (Secrets)
 .env
+
+# Databases (Local data)
+*.db
+*.sqlite3
+backend/rag/chroma_db/
+
+# Models (Large binary files)
+models/
+
+# IDE Settings
+.vscode/
+.idea/
+.trae/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Node
+node_modules/

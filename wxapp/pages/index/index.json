@@ -1,0 +1,7 @@
+{
+    "usingComponents": {
+        "status-sphere": "/components/status-sphere/index",
+        "chat-display": "/components/chat-display/index"
+    },
+    "navigationStyle": "custom"
+}

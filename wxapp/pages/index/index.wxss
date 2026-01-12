@@ -1,0 +1,63 @@
+/** index.wxss **/
+.container {
+  background: var(--bg-color);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Background Ambient Light */
+.container::before {
+  content: '';
+  position: absolute;
+  top: -20%;
+  left: -20%;
+  width: 140%;
+  height: 60%;
+  background: radial-gradient(circle, rgba(0,122,255,0.05), transparent 70%);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.top-bar {
+  position: absolute;
+  top: calc(env(safe-area-inset-top) + 20rpx);
+  left: 40rpx;
+  z-index: 100;
+}
+
+.profile-btn {
+  width: 80rpx;
+  height: 80rpx;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  overflow: hidden;
+}
+
+.avatar-icon {
+  width: 100%;
+  height: 100%;
+  background: #ddd; /* Placeholder color */
+}
+
+.center-stage {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  z-index: 10;
+  margin-top: -100rpx; /* Visual centering adjustment */
+}
+
+.bottom-stage {
+  height: 300rpx;
+  width: 100%;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 40rpx);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 10;
+}

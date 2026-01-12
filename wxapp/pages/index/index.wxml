@@ -1,0 +1,18 @@
+<view class="container">
+  <!-- Top Bar (Optional, for profile access) -->
+  <view class="top-bar">
+    <view class="profile-btn glass-card" bindtap="goToProfile">
+      <image class="avatar-icon" src="/assets/avatar-placeholder.png" mode="aspectFill"></image>
+    </view>
+  </view>
+
+  <!-- Center Status Sphere -->
+  <view class="center-stage">
+    <status-sphere status="{{status}}" volume="{{volume}}" bind:sphereTap="handleSphereTap"></status-sphere>
+  </view>
+
+  <!-- Bottom Chat Display -->
+  <view class="bottom-stage">
+    <chat-display text="{{displayText}}" role="{{displayRole}}"></chat-display>
+  </view>
+</view>

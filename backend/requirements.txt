@@ -6,3 +6,5 @@ requests
 fastapi
 uvicorn
 webrtcvad
+chromadb
+sentence-transformers
