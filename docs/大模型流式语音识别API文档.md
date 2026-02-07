@@ -1,5 +1,3 @@
-APP ID：4679009481
-Access Token：g3YmeBGmPl-eL2XbgikFP3mzej4yPQGs
 
 <span id="1d388eb1"></span>
 # 简介

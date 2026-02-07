@@ -1,7 +1,4 @@
 语音合成API  豆包语音合成大模型接入文档
-APP ID：4679009481
-Access Token：g3YmeBGmPl-eL2XbgikFP3mzej4yPQGs
-Voice_type：zh_female_wanwanxiaohe_moon_bigtts
 
 <span id="70413752"></span>
 # 1 接口功能

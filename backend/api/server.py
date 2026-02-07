@@ -12,6 +12,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from typing import Optional
 from ..stt.asr_client import ASRClient
 from ..llm.llm_client import LLMClient
 from ..tts.tts_client import TTSClient
@@ -29,7 +30,7 @@ async def startup_event():
     database.init_db()
 
 class CreateSessionRequest(BaseModel):
-    user_id: str | None = None
+    user_id: Optional[str] = None
 
 @app.post("/api/sessions")
 async def create_session_endpoint(req: CreateSessionRequest, request: Request):
@@ -44,7 +45,7 @@ async def create_session_endpoint(req: CreateSessionRequest, request: Request):
     return {"session_id": session_id}
 
 @app.get("/api/sessions")
-async def get_sessions_endpoint(request: Request, user_id: str | None = None):
+async def get_sessions_endpoint(request: Request, user_id: Optional[str] = None):
     uid = user_id
     if not uid:
         auth = request.headers.get("Authorization")
@@ -65,7 +66,7 @@ async def root():
     """)
 
 @app.websocket("/ws/voice")
-async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = None):
+async def ws_voice(websocket: WebSocket, session_id: str, token: Optional[str] = None):
     await websocket.accept()
     loop = asyncio.get_running_loop()
     asr = ASRClient()
@@ -202,9 +203,14 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
             # Save Assistant Message
             database.add_message(session_id, "assistant", reply)
             history.append({"role": "assistant", "content": reply})
-        except Exception:
+        except Exception as e:
             reply = s
-            asyncio.run_coroutine_threadsafe(send_text_obj({"event": "llm_error", "fallback_text": reply}), loop)
+            detail = ""
+            try:
+                detail = str(e)
+            except Exception:
+                detail = ""
+            asyncio.run_coroutine_threadsafe(send_text_obj({"event": "llm_error", "fallback_text": reply, "detail": detail}), loop)
         
         with tts_lock:
             try:
@@ -290,7 +296,14 @@ async def ws_voice(websocket: WebSocket, session_id: str, token: str | None = No
                             if isinstance(tt, str) and tt.strip():
                                 asyncio.run_coroutine_threadsafe(send_text_obj({"event": "asr_text", "text": tt}), loop)
                                 trigger_reply(tt)
-                                break
+                                return
+                tt = res.get("text")
+                if isinstance(tt, str) and tt.strip():
+                    is_final = res.get("is_final")
+                    final = res.get("final")
+                    if is_final is True or final == 1 or not isinstance(uts, list):
+                        asyncio.run_coroutine_threadsafe(send_text_obj({"event": "asr_text", "text": tt}), loop)
+                        trigger_reply(tt)
         except Exception:
             asyncio.run_coroutine_threadsafe(send_text_obj({"event": "error", "stage": "asr_recv"}), loop)
 
@@ -479,7 +492,7 @@ def _jwt_sign(payload: dict) -> str:
     sig = hmac.new(AUTH_JWT_SECRET.encode(), (h64 + "." + p64).encode(), hashlib.sha256).digest()
     return h64 + "." + p64 + "." + _b64url(sig)
 
-def _jwt_user(token: str) -> str | None:
+def _jwt_user(token: str) -> Optional[str]:
     import base64, hashlib, hmac, json, time
     try:
         parts = token.split(".")
