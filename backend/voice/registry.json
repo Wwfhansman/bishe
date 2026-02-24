@@ -1,0 +1,27 @@
+{
+  "stt": {
+    "local_sherpa_streaming": {
+      "type": "sherpa_onnx",
+      "model_dir": "models/stt/sherpa-onnx",
+      "sample_rate": 16000,
+      "num_threads": 4,
+      "endpoint": {
+        "enabled": true,
+        "rule1_min_trailing_silence": 0.8,
+        "rule2_min_trailing_silence": 1.2,
+        "rule3_min_utterance_length": 200
+      }
+    }
+  },
+  "tts": {
+    "local_piper_onnx": {
+      "type": "piper_onnx",
+      "model_path": "models/tts/piper-onnx/voice.onnx",
+      "config_path": "models/tts/piper-onnx/voice.onnx.json",
+      "sample_rate": 22050,
+      "speaker_id": 0,
+      "length_scale": 1.0,
+      "noise_scale": 0.667
+    }
+  }
+}

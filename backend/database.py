@@ -39,12 +39,9 @@ def init_db():
     ''')
     c.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
     
-    # Create conversations table with session_id
-    # Note: We are dropping the old table to enforce the new schema. 
-    # In a production env, we would migrate, but here we reset for simplicity as agreed.
-    c.execute("DROP TABLE IF EXISTS conversations")
+    # Create conversations table
     c.execute('''
-        CREATE TABLE conversations (
+        CREATE TABLE IF NOT EXISTS conversations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
             role TEXT NOT NULL,
@@ -129,6 +126,22 @@ def clear_history(session_id: str):
     c.execute("DELETE FROM conversations WHERE session_id = ?", (session_id,))
     conn.commit()
     conn.close()
+
+def delete_session(session_id: str) -> bool:
+    """删除会话及其关联的所有对话记录（级联删除）"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("PRAGMA foreign_keys = ON")
+    c.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return False
+    c.execute("DELETE FROM conversations WHERE session_id = ?", (session_id,))
+    c.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    conn.commit()
+    conn.close()
+    return True
 
 def _hash_password(pw: str) -> str:
     import os, hashlib, base64

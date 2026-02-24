@@ -1,5 +1,4 @@
 import os
-import uuid
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -10,22 +9,11 @@ def env(name, default=None):
     v = os.environ.get(name)
     return v if v is not None and v != "" else default
 
-# ASR Config
-APP_ID = env("ASR_APP_ID")
-ACCESS_TOKEN = env("ASR_ACCESS_TOKEN")
-RESOURCE_ID = env("ASR_RESOURCE_ID", "volc.bigasr.sauc.duration")
-ENDPOINT = env("ASR_ENDPOINT", "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async")
-LANGUAGE = env("ASR_LANGUAGE", "zh-CN")
-CONNECT_ID = env("ASR_CONNECT_ID", str(uuid.uuid4()))
+# ASR Config (local model)
 RATE = int(env("ASR_RATE", "16000"))
 BITS = int(env("ASR_BITS", "16"))
 CHANNELS = int(env("ASR_CHANNELS", "1"))
-FORMAT = env("ASR_FORMAT", "pcm")
-CODEC = env("ASR_CODEC", "raw")
-INPUT_DEVICE = env("ASR_INPUT_DEVICE")
-CHUNK_MS = int(env("ASR_CHUNK_MS", "200"))
-ASR_END_WINDOW_SIZE = int(env("ASR_END_WINDOW_SIZE", "800"))
-ASR_FORCE_TO_SPEECH_TIME = int(env("ASR_FORCE_TO_SPEECH_TIME", "1000"))
+LANGUAGE = env("ASR_LANGUAGE", "zh-CN")
 
 # LLM Config
 ARK_API_KEY = env("ARK_API_KEY")
@@ -45,12 +33,8 @@ LLM_SYSTEM_PROMPT = """
 记住：你是一个懂生活、会做饭的好帮手，而不是一个只会卖萌的机器人。
 """
 
-# TTS Config
-TC_APP_ID = env("TC_APP_ID")
-TC_SECRET_ID = env("TC_SECRET_ID")
-TC_SECRET_KEY = env("TC_SECRET_KEY")
-TC_VOICE_TYPE = env("TC_VOICE_TYPE")
-TTS_VOICE_TYPE = env("TTS_VOICE_TYPE", TC_VOICE_TYPE if TC_VOICE_TYPE else "601005")
+# TTS Config (local model)
+TTS_VOICE_TYPE = env("TTS_VOICE_TYPE", "601005")
 TTS_RATE = int(env("TTS_RATE", "24000"))
 GREETING_TEXT = env("GREETING_TEXT", "你好呀，我是妮妮，今天想吃什么呢？")
 
@@ -65,3 +49,4 @@ RAG_DB_PATH = env("RAG_DB_PATH", "backend/rag/chroma_db")
 RAG_COLLECTION = env("RAG_COLLECTION", "kb_main")
 HF_ENDPOINT = env("HF_ENDPOINT", "https://hf-mirror.com")
 EMBED_LOCAL_DIR = env("EMBED_LOCAL_DIR", "models/bge-small-zh-v1.5")
+

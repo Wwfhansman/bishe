@@ -8,3 +8,8 @@ uvicorn
 webrtcvad
 chromadb
 sentence-transformers
+onnxruntime
+sherpa-onnx
+piper-tts
+psutil
+pytest
