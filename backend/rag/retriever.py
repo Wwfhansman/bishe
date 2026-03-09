@@ -26,9 +26,9 @@ def _embed_texts(texts):
     _set_hf_endpoint()
     local_dir = EMBED_LOCAL_DIR
     if local_dir and Path(local_dir).exists():
-        m = SentenceTransformer(local_dir)
+        m = SentenceTransformer(local_dir, device="cpu")
     else:
-        m = SentenceTransformer("BAAI/bge-small-zh-v1.5")
+        m = SentenceTransformer("BAAI/bge-small-zh-v1.5", device="cpu")
     embs = m.encode(texts, normalize_embeddings=True)
     return [list(map(float, e)) for e in embs]
 
