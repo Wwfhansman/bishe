@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/constants.dart';
 
@@ -9,6 +10,16 @@ class ApiService {
       'ngrok-skip-browser-warning': 'true',  // Bypass ngrok free tier interstitial page
     },
   ));
+
+  String _extractError(Object e) {
+    if (e is DioException) {
+      final code = e.response?.statusCode;
+      final data = e.response?.data;
+      final message = e.message ?? e.error?.toString() ?? e.toString();
+      return 'DioException(code: $code, message: $message, data: $data)';
+    }
+    return e.toString();
+  }
 
   Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
@@ -42,6 +53,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> login(String username, String password) async {
     try {
+      debugPrint('ApiService.login -> ${ConstantConfigs.baseUrl}/api/auth/login');
       final response = await _dio.post('/api/auth/login', data: {
         'username': username,
         'password': password,
@@ -52,12 +64,15 @@ class ApiService {
       }
       return response.data;
     } catch (e) {
-      return {'ok': false, 'error': e.toString()};
+      final error = _extractError(e);
+      debugPrint('ApiService.login error: $error');
+      return {'ok': false, 'error': error};
     }
   }
 
   Future<Map<String, dynamic>> register(String username, String password) async {
     try {
+      debugPrint('ApiService.register -> ${ConstantConfigs.baseUrl}/api/auth/register');
       final response = await _dio.post('/api/auth/register', data: {
         'username': username,
         'password': password,
@@ -68,7 +83,9 @@ class ApiService {
       }
       return response.data;
     } catch (e) {
-      return {'ok': false, 'error': e.toString()};
+      final error = _extractError(e);
+      debugPrint('ApiService.register error: $error');
+      return {'ok': false, 'error': error};
     }
   }
 

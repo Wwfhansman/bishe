@@ -27,6 +27,7 @@ class AppStateProvider with ChangeNotifier {
 
   String asrText = "";
   String llmText = "";
+  String? lastErrorMessage;
 
   StreamSubscription? _recordSub;
   bool _isStoppingVoiceChat = false;
@@ -50,10 +51,13 @@ class AppStateProvider with ChangeNotifier {
     if (res['ok'] == true) {
       isAuthenticated = true;
       userId = res['user_id'];
+      lastErrorMessage = null;
       await fetchSessions();
       notifyListeners();
       return true;
     }
+    lastErrorMessage = res['error']?.toString() ?? 'unknown_error';
+    notifyListeners();
     return false;
   }
 
@@ -62,10 +66,13 @@ class AppStateProvider with ChangeNotifier {
     if (res['ok'] == true) {
       isAuthenticated = true;
       userId = res['user_id'];
+      lastErrorMessage = null;
       await fetchSessions();
       notifyListeners();
       return true;
     }
+    lastErrorMessage = res['error']?.toString() ?? 'unknown_error';
+    notifyListeners();
     return false;
   }
 
@@ -80,6 +87,7 @@ class AppStateProvider with ChangeNotifier {
     sessions = [];
     asrText = "";
     llmText = "";
+    lastErrorMessage = null;
     notifyListeners();
   }
 

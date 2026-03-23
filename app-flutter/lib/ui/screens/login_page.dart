@@ -38,7 +38,10 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = false);
     
     if (!success) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('操作失败，请检查网络或用户名')));
+      final detail = state.lastErrorMessage ?? 'unknown_error';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('操作失败：$detail')),
+      );
     }
   }
 
@@ -137,6 +140,28 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 
                 const SizedBox(height: 40),
+
+                Consumer<AppStateProvider>(
+                  builder: (_, state, __) {
+                    final detail = state.lastErrorMessage;
+                    if (detail == null || detail.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    return Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF1F2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '当前错误：$detail',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF9F1239)),
+                      ),
+                    );
+                  },
+                ),
                 
                 // Actions
                 if (_isLoading)
