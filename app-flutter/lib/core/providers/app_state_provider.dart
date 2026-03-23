@@ -29,6 +29,7 @@ class AppStateProvider with ChangeNotifier {
   String llmText = "";
 
   StreamSubscription? _recordSub;
+  bool _isStoppingVoiceChat = false;
 
   AppStateProvider() {
     _initAuth();
@@ -99,6 +100,7 @@ class AppStateProvider with ChangeNotifier {
   }
 
   Future<void> startVoiceChat() async {
+    if (connectionState != VoiceConnectionState.disconnected) return;
     if (currentSessionId == null) {
       await startNewSession();
     }
@@ -107,80 +109,85 @@ class AppStateProvider with ChangeNotifier {
     connectionState = VoiceConnectionState.connecting;
     notifyListeners();
 
-    // BUG FIX #1: Init hardware AEC mode FIRST, then wait for it to take effect
-    await audioSessionService.initAudioSession();
+    try {
+      await audioSessionService.initAudioSession();
+      await audioPlayService.init();
 
-    // BUG FIX #3: Initialize audio player BEFORE connecting WebSocket
-    // so it's ready when the backend sends the greeting TTS
-    await audioPlayService.init();
+      webSocketService.onJsonMessage = (json) {
+        if (json['event'] == 'asr_text') {
+          asrText = json['text'] ?? '';
+        } else if (json['event'] == 'llm_text') {
+          llmText = json['text'] ?? '';
+        } else if (json['event'] == 'tts_start') {
+          isAIPlayback = true;
+          final rate = json['rate'] ?? 24000;
+          audioPlayService.startStream(sampleRate: rate);
+        } else if (json['event'] == 'tts_done') {
+          isAIPlayback = false;
+        } else if (json['event'] == 'tts_reset') {
+          audioPlayService.reset();
+          isAIPlayback = false;
+        }
+        notifyListeners();
+      };
 
-    // Set up WebSocket callbacks
-    webSocketService.onJsonMessage = (json) {
-      if (json['event'] == 'asr_text') {
-        asrText = json['text'] ?? '';
-      } else if (json['event'] == 'llm_text') {
-        llmText = json['text'] ?? '';
-      } else if (json['event'] == 'tts_start') {
-        isAIPlayback = true;
-        final rate = json['rate'] ?? 24000;
-        audioPlayService.startStream(sampleRate: rate);
-      } else if (json['event'] == 'tts_done') {
-        isAIPlayback = false;
-      } else if (json['event'] == 'tts_reset') {
-        audioPlayService.reset();
-        isAIPlayback = false;
+      webSocketService.onBinaryMessage = (data) {
+        audioPlayService.feedData(data);
+      };
+
+      webSocketService.onClosed = () {
+        if (!_isStoppingVoiceChat) {
+          unawaited(stopVoiceChat());
+        }
+      };
+
+      webSocketService.onError = (e) {
+        connectionState = VoiceConnectionState.disconnected;
+        notifyListeners();
+      };
+
+      await webSocketService.connect(currentSessionId!, apiService: apiService);
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      final stream = await recordService.startStream();
+      if (stream == null) {
+        await stopVoiceChat();
+        return;
       }
-      notifyListeners();
-    };
 
-    webSocketService.onBinaryMessage = (data) {
-      audioPlayService.feedData(data);
-    };
-
-    webSocketService.onClosed = () {
-      stopVoiceChat();
-    };
-
-    webSocketService.onError = (e) {
-      // Handle error
-    };
-
-    // Connect WebSocket - this will send 'init' and trigger backend greeting
-    await webSocketService.connect(currentSessionId!, apiService: apiService);
-    connectionState = VoiceConnectionState.connected;
-
-    // BUG FIX #1: Add a small delay after AEC init so the hardware mode is fully active
-    // before we start recording. Without this, the first few hundred ms of recording
-    // may not have AEC applied.
-    await Future.delayed(const Duration(milliseconds: 300));
-
-    // Start mic recording and push to ws
-    final stream = await recordService.startStream();
-    if (stream != null) {
+      connectionState = VoiceConnectionState.connected;
       isRecording = true;
       _recordSub = stream.listen((data) {
         if (connectionState == VoiceConnectionState.connected) {
           webSocketService.sendBinary(data);
         }
       });
+    } catch (_) {
+      await stopVoiceChat();
+      return;
     }
 
     notifyListeners();
   }
 
   Future<void> stopVoiceChat() async {
+    if (_isStoppingVoiceChat) return;
+    _isStoppingVoiceChat = true;
     connectionState = VoiceConnectionState.disconnected;
     isRecording = false;
     isAIPlayback = false;
-    
-    await _recordSub?.cancel();
-    _recordSub = null;
-    
-    await recordService.stop();
-    await audioPlayService.stop();
-    webSocketService.disconnect();
-    
-    notifyListeners();
+
+    try {
+      await _recordSub?.cancel();
+      _recordSub = null;
+
+      await recordService.stop();
+      await audioPlayService.stop();
+      webSocketService.disconnect();
+    } finally {
+      _isStoppingVoiceChat = false;
+      notifyListeners();
+    }
   }
 
   void interruptAI() {

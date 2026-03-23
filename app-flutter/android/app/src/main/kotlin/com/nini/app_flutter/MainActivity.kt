@@ -13,8 +13,9 @@ import kotlin.concurrent.thread
 
 class MainActivity: FlutterActivity() {
     private val CHANNEL = "com.nini.app_flutter/audio_playback"
+    private val MAX_AUDIO_QUEUE_SIZE = 32
     private var audioTrack: AudioTrack? = null
-    private var audioQueue = LinkedBlockingQueue<ByteArray>()
+    private var audioQueue = LinkedBlockingQueue<ByteArray>(MAX_AUDIO_QUEUE_SIZE)
     @Volatile private var isPlaying = false
     private var playThread: Thread? = null
 
@@ -30,7 +31,10 @@ class MainActivity: FlutterActivity() {
                 "feed" -> {
                     val data = call.argument<ByteArray>("data")
                     if (data != null) {
-                        audioQueue.offer(data)
+                        if (!audioQueue.offer(data)) {
+                            audioQueue.poll()
+                            audioQueue.offer(data)
+                        }
                     }
                     result.success(null)
                 }
@@ -53,7 +57,7 @@ class MainActivity: FlutterActivity() {
 
     private fun initAudioTrack(sampleRate: Int) {
         stopAudioTrack()
-        audioQueue.clear()
+        audioQueue = LinkedBlockingQueue(MAX_AUDIO_QUEUE_SIZE)
         
         // Fix Low Volume: Force VoiceCommunication to use Speakerphone instead of Earpiece
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager

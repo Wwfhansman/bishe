@@ -323,6 +323,7 @@
       wsUrl.protocol = (wsUrl.protocol === 'https:') ? 'wss:' : 'ws:';
       wsUrl.searchParams.append('session_id', currentSessionId);
       if (token) wsUrl.searchParams.append('token', token);
+      if (!token && userId) wsUrl.searchParams.append('user_id', userId);
       ws = new WebSocket(wsUrl.href);
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => { statusEl.textContent = '已连接，开始推流'; log({ event: 'ws_open' }); };

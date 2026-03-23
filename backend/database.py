@@ -4,7 +4,14 @@ import time
 import uuid
 from typing import List, Dict, Optional
 
-DB_PATH = "voice_assistant.db"
+try:
+    from .config import env
+except Exception:
+    def env(name, default=None):
+        return default
+
+
+DB_PATH = env("DB_PATH", "voice_assistant.db")
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -96,6 +103,24 @@ def get_session_history(session_id: str, limit: int = 20) -> List[Dict]:
     # Return last N messages
     return [dict(row) for row in rows][-limit:]
 
+
+def get_session_owner(session_id: str) -> Optional[str]:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT user_id FROM sessions WHERE id = ?", (session_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return row[0]
+
+
+def session_belongs_to(session_id: str, user_id: Optional[str]) -> bool:
+    if not user_id:
+        return False
+    owner = get_session_owner(session_id)
+    return owner == user_id
+
 def add_message(session_id: str, role: str, content: str):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -127,12 +152,15 @@ def clear_history(session_id: str):
     conn.commit()
     conn.close()
 
-def delete_session(session_id: str) -> bool:
+def delete_session(session_id: str, user_id: Optional[str] = None) -> bool:
     """删除会话及其关联的所有对话记录（级联删除）"""
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("PRAGMA foreign_keys = ON")
-    c.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
+    if user_id:
+        c.execute("SELECT id FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
+    else:
+        c.execute("SELECT id FROM sessions WHERE id = ?", (session_id,))
     row = c.fetchone()
     if not row:
         conn.close()

@@ -16,6 +16,7 @@ class WebSocketService {
   Function(dynamic)? onError;
 
   Future<void> connect(String sessionId, {required ApiService apiService}) async {
+    disconnect();
     final token = await apiService.getToken();
     final url = Uri.parse(ConstantConfigs.wsUrl).replace(queryParameters: {
       'session_id': sessionId,
@@ -64,6 +65,7 @@ class WebSocketService {
   /// Disconnect web socket completely
   void disconnect() {
     _subscription?.cancel();
+    _subscription = null;
     _channel?.sink.close();
     _channel = null;
   }
