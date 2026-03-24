@@ -86,6 +86,22 @@
     #controls {
       margin-bottom: 10px;
     }
+
+    #perf {
+      background: #fff;
+      border: 1px solid #ddd;
+      padding: 8px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      color: #333;
+    }
+
+    #perfControls {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
   </style>
 </head>
 
@@ -113,7 +129,13 @@
       <button id="stopBtn" disabled>停止监听</button>
       <button id="probeBtn">探测TTS</button>
     </div>
+    <div id="perfControls">
+      <button id="downloadPerfJsonBtn">下载Perf JSON</button>
+      <button id="downloadPerfCsvBtn">下载Perf CSV</button>
+      <button id="clearPerfBtn">清空Perf</button>
+    </div>
     <div id="status">未连接</div>
+    <div id="perf">Perf: 尚无数据</div>
     <pre id="log" style="flex: 1; overflow:auto; background:#f5f5f5; padding:8px; border:1px solid #ddd"></pre>
   </div>
 
@@ -128,6 +150,10 @@
     const loginBtn = document.getElementById('loginBtn');
     const registerBtn = document.getElementById('registerBtn');
     const logoutBtn = document.getElementById('logoutBtn');
+    const perfEl = document.getElementById('perf');
+    const downloadPerfJsonBtn = document.getElementById('downloadPerfJsonBtn');
+    const downloadPerfCsvBtn = document.getElementById('downloadPerfCsvBtn');
+    const clearPerfBtn = document.getElementById('clearPerfBtn');
 
     let ws = null;
     let audioCtx = null;
@@ -140,6 +166,7 @@
     let userId = localStorage.getItem('voice_user_id');
     let token = localStorage.getItem('voice_token');
     let authUserId = null;
+    let perfHistory = [];
 
     if (!userId) {
       userId = 'user_' + Math.random().toString(36).substring(2, 15);
@@ -147,6 +174,28 @@
     }
 
     function log(msg) { const el = document.getElementById('log'); el.textContent += (typeof msg === 'string' ? msg : JSON.stringify(msg)) + "\n"; el.scrollTop = el.scrollHeight; }
+    function renderPerf(metrics) {
+      if (!metrics) { perfEl.textContent = 'Perf: 尚无数据'; return; }
+      perfEl.textContent = 'Perf:\n' + JSON.stringify(metrics, null, 2);
+    }
+    function downloadBlob(filename, content, type) {
+      const blob = new Blob([content], { type: type || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+    function perfToCsv(rows) {
+      if (!rows || rows.length === 0) return '';
+      const keys = Object.keys(rows[0]);
+      const head = keys.join(',');
+      const body = rows.map(r => keys.map(k => JSON.stringify(r[k] ?? '')).join(',')).join('\n');
+      return head + '\n' + body;
+    }
 
     // Fetch and display sessions
     async function loadSessions() {
@@ -339,6 +388,17 @@
             if (o && o.event === 'tts_start' && typeof o.rate === 'number') {
               ttsSampleRate = o.rate;
             }
+            if (o && o.event === 'perf') {
+              const metrics = o.metrics || null;
+              renderPerf(metrics);
+              if (metrics) {
+                perfHistory.push({
+                  ts: new Date().toISOString(),
+                  session_id: currentSessionId,
+                  ...metrics
+                });
+              }
+            }
             log(o);
             if (o.event === 'llm_text' || o.event === 'tts_done') {
               loadSessions();
@@ -429,6 +489,19 @@
     loginBtn.onclick = login;
     registerBtn.onclick = register;
     logoutBtn.onclick = logout;
+    downloadPerfJsonBtn.onclick = () => {
+      const name = `perf_${currentSessionId || 'session'}_${Date.now()}.json`;
+      downloadBlob(name, JSON.stringify(perfHistory, null, 2), 'application/json');
+    };
+    downloadPerfCsvBtn.onclick = () => {
+      const name = `perf_${currentSessionId || 'session'}_${Date.now()}.csv`;
+      downloadBlob(name, perfToCsv(perfHistory), 'text/csv');
+    };
+    clearPerfBtn.onclick = () => {
+      perfHistory = [];
+      renderPerf(null);
+      log({ event: 'perf_cleared' });
+    };
     refreshAuthState();
   </script>
 </body>

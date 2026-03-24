@@ -99,6 +99,7 @@ class VoiceSessionRunner:
         self.reply_stop_evt = threading.Event()
         self.reply_thread: Optional[threading.Thread] = None
         self.tts_lock = threading.Lock()
+        self.perf_lock = threading.Lock()
 
         self.send_enabled = True
         self.recv_bytes = 0
@@ -108,6 +109,15 @@ class VoiceSessionRunner:
         self.cooldown_sec = 5.0
         self.last_tts_end_time = 0.0
         self.last_tts_chunk_time = 0.0
+
+        self.perf_asr_partial_ts: Optional[float] = None
+        self.perf_asr_final_ts: Optional[float] = None
+        self.perf_llm_start_ts: Optional[float] = None
+        self.perf_llm_end_ts: Optional[float] = None
+        self.perf_rag_ms: Optional[float] = None
+        self.perf_tts_start_ts: Optional[float] = None
+        self.perf_tts_first_chunk_ts: Optional[float] = None
+        self.perf_tts_end_ts: Optional[float] = None
 
         self.barge_in = BargeInState()
         self.frame_bytes = int(ASR_RATE * self.barge_in.frame_ms / 1000) * 2
@@ -342,10 +352,17 @@ class VoiceSessionRunner:
 
         reply = text
         try:
+            rag_t0 = time.perf_counter()
             rag_text = self._build_rag_context(text)
+            rag_ms = (time.perf_counter() - rag_t0) * 1000.0
+            with self.perf_lock:
+                self.perf_rag_ms = rag_ms
+                self.perf_llm_start_ts = time.perf_counter()
             sys_prompt = LLM_SYSTEM_PROMPT if not rag_text else LLM_SYSTEM_PROMPT + "\n" + rag_text
             recent_hist = self.history[-7:-1] if len(self.history) > 6 else self.history[:-1]
             reply = self.llm.chat(text, system=sys_prompt, history=recent_hist)
+            with self.perf_lock:
+                self.perf_llm_end_ts = time.perf_counter()
             if self.loop is not None:
                 asyncio.run_coroutine_threadsafe(
                     self._send_text_obj({"event": "llm_text", "text": reply}),
@@ -364,6 +381,7 @@ class VoiceSessionRunner:
                 )
 
         self._speak_text(reply)
+        self._emit_perf_metrics()
 
     def _build_rag_context(self, text: str) -> Optional[str]:
         try:
@@ -381,6 +399,9 @@ class VoiceSessionRunner:
     def _speak_text(self, text: str) -> None:
         with self.tts_lock:
             try:
+                with self.perf_lock:
+                    self.perf_tts_start_ts = time.perf_counter()
+                    self.perf_tts_first_chunk_ts = None
                 self.barge_in.speech_state = SpeechState.SPEAKING
                 self.barge_in.speaking_frames = 0
                 self.barge_in.silence_frames = 0
@@ -408,6 +429,9 @@ class VoiceSessionRunner:
                         continue
                     count += 1
                     self.last_tts_chunk_time = time.time()
+                    with self.perf_lock:
+                        if self.perf_tts_first_chunk_ts is None:
+                            self.perf_tts_first_chunk_ts = time.perf_counter()
                     self._put_audio(data)
                     if count % 5 == 0 and self.loop is not None:
                         asyncio.run_coroutine_threadsafe(
@@ -417,6 +441,8 @@ class VoiceSessionRunner:
                 self.last_tts_end_time = time.time()
                 self.last_tts_chunk_time = self.last_tts_end_time
                 self.barge_in.speech_state = SpeechState.IDLE
+                with self.perf_lock:
+                    self.perf_tts_end_ts = time.perf_counter()
                 if self.loop is not None:
                     asyncio.run_coroutine_threadsafe(
                         self._send_text_obj({"event": "tts_done", "count": count}),
@@ -425,11 +451,59 @@ class VoiceSessionRunner:
             except Exception as e:
                 self.barge_in.speech_state = SpeechState.IDLE
                 self.last_tts_end_time = time.time()
+                with self.perf_lock:
+                    self.perf_tts_end_ts = time.perf_counter()
                 if self.loop is not None:
                     asyncio.run_coroutine_threadsafe(
                         self._send_text_obj({"event": "error", "stage": "tts", "detail": str(e)}),
                         self.loop,
                     )
+
+    def _emit_perf_metrics(self) -> None:
+        with self.perf_lock:
+            asr_partial_ms = None
+            asr_final_ms = None
+            if self.perf_asr_partial_ts and self.perf_asr_final_ts:
+                asr_partial_ms = (self.perf_asr_final_ts - self.perf_asr_partial_ts) * 1000.0
+            if self.perf_asr_final_ts and self.perf_tts_end_ts:
+                asr_final_ms = (self.perf_tts_end_ts - self.perf_asr_final_ts) * 1000.0
+
+            llm_ms = None
+            if self.perf_llm_start_ts and self.perf_llm_end_ts:
+                llm_ms = (self.perf_llm_end_ts - self.perf_llm_start_ts) * 1000.0
+
+            tts_first_chunk_ms = None
+            if self.perf_tts_start_ts and self.perf_tts_first_chunk_ts:
+                tts_first_chunk_ms = (self.perf_tts_first_chunk_ts - self.perf_tts_start_ts) * 1000.0
+
+            tts_ms = None
+            if self.perf_tts_start_ts and self.perf_tts_end_ts:
+                tts_ms = (self.perf_tts_end_ts - self.perf_tts_start_ts) * 1000.0
+
+            metrics = {
+                "rag_ms": round(self.perf_rag_ms, 2) if self.perf_rag_ms is not None else None,
+                "llm_ms": round(llm_ms, 2) if llm_ms is not None else None,
+                "tts_first_chunk_ms": round(tts_first_chunk_ms, 2) if tts_first_chunk_ms is not None else None,
+                "tts_ms": round(tts_ms, 2) if tts_ms is not None else None,
+                "asr_partial_to_final_ms": round(asr_partial_ms, 2) if asr_partial_ms is not None else None,
+                "asr_final_to_tts_end_ms": round(asr_final_ms, 2) if asr_final_ms is not None else None,
+                "speech_state": self.barge_in.speech_state.value,
+            }
+
+            self.perf_asr_partial_ts = None
+            self.perf_asr_final_ts = None
+            self.perf_llm_start_ts = None
+            self.perf_llm_end_ts = None
+            self.perf_rag_ms = None
+            self.perf_tts_start_ts = None
+            self.perf_tts_first_chunk_ts = None
+            self.perf_tts_end_ts = None
+
+        if self.loop is not None:
+            asyncio.run_coroutine_threadsafe(
+                self._send_text_obj({"event": "perf", "metrics": metrics}),
+                self.loop,
+            )
 
     def _play_greeting(self, text: str) -> None:
         try:
@@ -452,9 +526,14 @@ class VoiceSessionRunner:
                         if not isinstance(result.text, str) or not result.text.strip():
                             continue
                         if result.is_final:
+                            with self.perf_lock:
+                                self.perf_asr_final_ts = time.perf_counter()
                             await self._send_text_obj({"event": "asr_text", "text": result.text})
                             self.reply_q.put(ReplyTask(kind="reply", text=result.text))
                         else:
+                            with self.perf_lock:
+                                if self.perf_asr_partial_ts is None:
+                                    self.perf_asr_partial_ts = time.perf_counter()
                             await self._send_text_obj({"event": "asr_partial", "text": result.text})
                 await asyncio.sleep(0.05)
         except asyncio.CancelledError:

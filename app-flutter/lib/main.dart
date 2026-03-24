@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/providers/app_state_provider.dart';
 import 'ui/screens/login_page.dart';
-import 'ui/screens/home_page.dart'; // We'll create this next
+import 'ui/screens/home_page.dart';
+import 'ui/theme/app_theme.dart';
 
 void main() {
   runApp(
@@ -22,14 +23,8 @@ class NiniApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '厨房助理 妮妮',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueAccent),
-        textTheme: const TextTheme(
-          bodyLarge: TextStyle(fontFamily: 'Roboto'),
-          bodyMedium: TextStyle(fontFamily: 'Roboto'),
-        ),
-      ),
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light(),
       home: Consumer<AppStateProvider>(
         builder: (context, state, child) {
           return state.isAuthenticated ? const HomePage() : const LoginPage();

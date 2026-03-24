@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/providers/app_state_provider.dart';
+import '../theme/app_theme.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
@@ -8,13 +9,11 @@ class ProfilePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppStateProvider>();
-    
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F8FD),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('个人中心', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
+        title: const Text('个人中心'),
         centerTitle: false,
         actions: [
           IconButton(
@@ -24,78 +23,278 @@ class ProfilePage extends StatelessWidget {
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
         child: Column(
           children: [
+            // ── 头部装饰区 ──────────────────────────
             Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.blueAccent, width: 2),
+              width: double.infinity,
+              padding: const EdgeInsets.only(top: 8, bottom: 36),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xFFFFF3E0), AppColors.background],
+                ),
               ),
-              child: const CircleAvatar(
-                radius: 44,
-                backgroundColor: Colors.white,
-                child: Icon(Icons.person, size: 48, color: Colors.blueAccent),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(state.userId ?? 'User', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            Container(
-              margin: const EdgeInsets.only(top: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12)),
-              child: const Text('Lv.5 主厨', style: TextStyle(color: Colors.blueAccent, fontSize: 13, fontWeight: FontWeight.bold)),
-            ),
-            
-            const SizedBox(height: 48),
-            
-            _buildActionItem(context, Icons.info_outline, '关于我们', onTap: () {}),
-            const SizedBox(height: 12),
-            _buildActionItem(context, Icons.logout, '退出登录', isDestructive: true, onTap: () {
-              showDialog(
-                context: context,
-                builder: (c) => AlertDialog(
-                  title: const Text('退出登录'),
-                  content: const Text('确定要退出当前账号吗？'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(c), child: const Text('取消')),
-                    TextButton(
-                      onPressed: () { 
-                        Navigator.pop(c);
-                        state.logout();
-                      }, 
-                      child: const Text('确定', style: TextStyle(color: Colors.redAccent))
+              child: Column(
+                children: [
+                  // 头像
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: const LinearGradient(
+                        colors: [AppColors.primary, AppColors.primaryLight],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.25),
+                          blurRadius: 16,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
                     ),
-                  ],
-                )
-              );
-            }),
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white,
+                      ),
+                      child: CircleAvatar(
+                        radius: 44,
+                        backgroundColor: AppColors.primarySurface,
+                        child: const Icon(
+                          Icons.person,
+                          size: 48,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // 用户名
+                  Text(
+                    state.userId ?? 'User',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // 等级标签
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [AppColors.primary, AppColors.primaryLight],
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      '🏅  Lv.5 主厨',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ── 统计小卡片 ──────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                children: [
+                  _StatChip(label: '对话', value: '—', icon: Icons.chat_bubble_outline),
+                  const SizedBox(width: 12),
+                  _StatChip(label: '食谱', value: '—', icon: Icons.restaurant_menu_outlined),
+                  const SizedBox(width: 12),
+                  _StatChip(label: '天数', value: '—', icon: Icons.calendar_today_outlined),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 32),
+
+            // ── 操作列表 ──────────────────────────
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(left: 4, bottom: 12),
+                    child: Text(
+                      '设置',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textHint,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                  ),
+                  _buildActionItem(
+                    context,
+                    Icons.info_outline,
+                    '关于我们',
+                    onTap: () {},
+                  ),
+                  const SizedBox(height: 12),
+                  _buildActionItem(
+                    context,
+                    Icons.logout_rounded,
+                    '退出登录',
+                    isDestructive: true,
+                    onTap: () {
+                      showDialog(
+                        context: context,
+                        builder: (c) => AlertDialog(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          title: const Text('退出登录', style: TextStyle(color: AppColors.textPrimary)),
+                          content: const Text('确定要退出当前账号吗？', style: TextStyle(color: AppColors.textSecondary)),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(c),
+                              child: const Text('取消', style: TextStyle(color: AppColors.textHint)),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                Navigator.pop(c);
+                                state.logout();
+                              },
+                              child: const Text('退出', style: TextStyle(color: AppColors.error)),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 40),
+                ],
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildActionItem(BuildContext context, IconData icon, String title, {bool isDestructive = false, required VoidCallback onTap}) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          )
-        ]
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-        leading: Icon(icon, color: isDestructive ? Colors.redAccent : Colors.black87),
-        title: Text(title, style: TextStyle(color: isDestructive ? Colors.redAccent : Colors.black87, fontWeight: FontWeight.w600)),
-        trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+  Widget _buildActionItem(
+    BuildContext context,
+    IconData icon,
+    String title, {
+    bool isDestructive = false,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.shadowWarm,
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+            leading: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: isDestructive
+                    ? AppColors.errorSurface
+                    : AppColors.primarySurface,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                icon,
+                color: isDestructive ? AppColors.error : AppColors.primary,
+                size: 20,
+              ),
+            ),
+            title: Text(
+              title,
+              style: TextStyle(
+                color: isDestructive ? AppColors.error : AppColors.textPrimary,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+            ),
+            trailing: Icon(
+              Icons.chevron_right,
+              color: isDestructive ? AppColors.error.withValues(alpha: 0.5) : AppColors.textHint,
+              size: 20,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatChip extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+
+  const _StatChip({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.shadowWarm,
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Icon(icon, size: 20, color: AppColors.primary),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 11, color: AppColors.textHint),
+            ),
+          ],
+        ),
       ),
     );
   }
