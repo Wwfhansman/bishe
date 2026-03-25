@@ -4,37 +4,37 @@ import 'package:flutter/material.dart';
 class AppColors {
   AppColors._();
 
-  // 主色：橙琥珀暖橙
-  static const Color primary = Color(0xFFE07B39);
-  static const Color primaryLight = Color(0xFFF5A623);
-  static const Color primarySurface = Color(0xFFFEF3E2);
+  // 主色：深青绿 + 柔和薄荷
+  static const Color primary = Color(0xFF1F6F78);
+  static const Color primaryLight = Color(0xFF4FB3B0);
+  static const Color primarySurface = Color(0xFFE7F6F4);
 
-  // 背景：奶油白层次
-  static const Color background = Color(0xFFFFF8F0);
-  static const Color surface = Color(0xFFFFFDF8);
-  static const Color surfaceVariant = Color(0xFFFFF3E0);
+  // 背景：清爽浅灰与微暖白
+  static const Color background = Color(0xFFF5F6F8);
+  static const Color surface = Color(0xFFFFFFFF);
+  static const Color surfaceVariant = Color(0xFFF1F5F9);
 
-  // 文字：咖啡深棕层次
-  static const Color textPrimary = Color(0xFF3D2B1F);
-  static const Color textSecondary = Color(0xFF7C5B48);
-  static const Color textHint = Color(0xFFB08A78);
+  // 文字：石墨黑层次
+  static const Color textPrimary = Color(0xFF1C1F24);
+  static const Color textSecondary = Color(0xFF4B5563);
+  static const Color textHint = Color(0xFF94A3B8);
 
   // 辅助
-  static const Color divider = Color(0xFFF0E6DC);
-  static const Color error = Color(0xFFD94F4F);
-  static const Color errorSurface = Color(0xFFFFF1F1);
-  static const Color success = Color(0xFF6B8F5E);
+  static const Color divider = Color(0xFFE5E7EB);
+  static const Color error = Color(0xFFE5484D);
+  static const Color errorSurface = Color(0xFFFFECEE);
+  static const Color success = Color(0xFF2F855A);
 
   // 阴影（暖棕色调）
-  static Color shadowWarm = const Color(0xFF3D2B1F).withValues(alpha: 0.08);
-  static Color shadowMedium = const Color(0xFF3D2B1F).withValues(alpha: 0.12);
+  static Color shadowWarm = const Color(0xFF0F172A).withValues(alpha: 0.08);
+  static Color shadowMedium = const Color(0xFF0F172A).withValues(alpha: 0.12);
 }
 
 class AppTheme {
   AppTheme._();
 
   static ThemeData light() {
-    const seedColor = Color(0xFFE07B39);
+    const seedColor = Color(0xFF1F6F78);
 
     return ThemeData(
       useMaterial3: true,

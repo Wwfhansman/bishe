@@ -33,7 +33,7 @@ class ProfilePage extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Color(0xFFFFF3E0), AppColors.background],
+                  colors: [Color(0xFFE9F3F1), AppColors.background],
                 ),
               ),
               child: Column(
@@ -97,7 +97,7 @@ class ProfilePage extends StatelessWidget {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: const Text(
-                      '🏅  Lv.5 主厨',
+                      'Lv.5 主厨',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 13,
@@ -119,6 +119,22 @@ class ProfilePage extends StatelessWidget {
                   _StatChip(label: '食谱', value: '—', icon: Icons.restaurant_menu_outlined),
                   const SizedBox(width: 12),
                   _StatChip(label: '天数', value: '—', icon: Icons.calendar_today_outlined),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                children: const [
+                  Icon(Icons.info_outline, size: 14, color: AppColors.textHint),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '统计数据将在后续版本同步',
+                      style: TextStyle(fontSize: 12, color: AppColors.textHint),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -268,6 +284,7 @@ class _StatChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.divider),
           boxShadow: [
             BoxShadow(
               color: AppColors.shadowWarm,

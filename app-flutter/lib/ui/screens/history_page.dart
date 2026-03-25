@@ -9,6 +9,10 @@ class HistoryPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppStateProvider>();
+    final currentSession = state.sessions.firstWhere(
+      (s) => s['id'] == state.currentSessionId,
+      orElse: () => null,
+    );
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -32,9 +36,15 @@ class HistoryPage extends StatelessWidget {
           ? _buildEmptyState()
           : ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              itemCount: state.sessions.length,
+              itemCount: state.sessions.length + 1,
               itemBuilder: (context, index) {
-                final session = state.sessions[index];
+                if (index == 0) {
+                  return _CurrentSessionBanner(
+                    title: currentSession?['title'] ?? '未选择对话',
+                    hasSession: currentSession != null,
+                  );
+                }
+                final session = state.sessions[index - 1];
                 final dateStr = session['updated_at'] != null
                     ? _formatDate(session['updated_at'])
                     : '';
@@ -72,14 +82,14 @@ class HistoryPage extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: AppColors.primarySurface,
               shape: BoxShape.circle,
             ),
             child: const Icon(
               Icons.menu_book_outlined,
-              size: 48,
+              size: 42,
               color: AppColors.primary,
             ),
           ),
@@ -94,7 +104,7 @@ class HistoryPage extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            '去和妮妮聊聊吧 🍳',
+            '去和妮妮聊聊吧',
             style: TextStyle(fontSize: 14, color: AppColors.textHint),
           ),
         ],
@@ -128,31 +138,41 @@ class _SessionCard extends StatelessWidget {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 250),
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: isActive ? AppColors.primarySurface : AppColors.surface,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: isActive
-                    ? AppColors.primary.withValues(alpha: 0.4)
-                    : AppColors.divider,
-                width: isActive ? 1.5 : 1,
-              ),
-              boxShadow: [
-                BoxShadow(
+              decoration: BoxDecoration(
+                color: isActive ? AppColors.primarySurface : AppColors.surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
                   color: isActive
-                      ? AppColors.primary.withValues(alpha: 0.08)
-                      : AppColors.shadowWarm,
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
+                      ? AppColors.primary.withValues(alpha: 0.4)
+                      : AppColors.divider,
+                  width: isActive ? 1.5 : 1,
                 ),
-              ],
-            ),
-            child: Row(
-              children: [
-                // Leading icon
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
+                boxShadow: [
+                  BoxShadow(
+                    color: isActive
+                        ? AppColors.primary.withValues(alpha: 0.08)
+                        : AppColors.shadowWarm,
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  if (isActive)
+                    Container(
+                      width: 4,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  if (isActive) const SizedBox(width: 10),
+                  // Leading icon
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
                     gradient: isActive
                         ? const LinearGradient(
                             colors: [AppColors.primary, AppColors.primaryLight],
@@ -218,6 +238,55 @@ class _SessionCard extends StatelessWidget {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CurrentSessionBanner extends StatelessWidget {
+  final String title;
+  final bool hasSession;
+
+  const _CurrentSessionBanner({required this.title, required this.hasSession});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.divider),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.shadowWarm,
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.play_circle_fill,
+              color: hasSession ? AppColors.primary : AppColors.textHint,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                hasSession ? '当前对话：$title' : '当前未选择对话',
+                style: TextStyle(
+                  color: hasSession ? AppColors.textPrimary : AppColors.textHint,
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
         ),
       ),
     );
