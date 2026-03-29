@@ -1,183 +1,268 @@
 <!doctype html>
-<html>
+<html lang="zh-CN">
 
 <head>
   <meta charset="utf-8" />
-  <title>Voice Interaction Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>语音交互测试</title>
   <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --border: #d9dee5;
+      --text: #1f2933;
+      --muted: #52606d;
+      --accent: #1769aa;
+      --accent-weak: #e8f1f8;
+      --danger: #b42318;
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      font-family: system-ui, sans-serif;
       margin: 0;
-      display: flex;
-      height: 100vh;
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(180deg, #f7f9fb 0%, #edf2f7 100%);
+      color: var(--text);
     }
 
-    #sidebar {
-      width: 250px;
-      background: #f0f0f0;
-      border-right: 1px solid #ddd;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 24px 20px 32px;
     }
 
-    #main {
-      flex: 1;
-      padding: 20px;
-      display: flex;
-      flex-direction: column;
+    .hero {
+      margin-bottom: 18px;
     }
 
-    h3 {
-      margin-top: 0;
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      font-weight: 700;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
     }
 
     button {
-      padding: 8px 12px;
-      margin-right: 10px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      padding: 10px 14px;
+      border-radius: 10px;
       cursor: pointer;
-    }
-
-    #sessionList {
-      list-style: none;
-      padding: 0;
-      margin-top: 20px;
-      overflow-y: auto;
-      flex: 1;
-    }
-
-    .session-item {
-      padding: 10px;
-      background: #fff;
-      border: 1px solid #ddd;
-      margin-bottom: 8px;
-      cursor: pointer;
-      border-radius: 4px;
-    }
-
-    .session-item:hover {
-      background: #e0e0e0;
-    }
-
-    .session-item.active {
-      border-color: #007bff;
-      background: #e6f2ff;
-    }
-
-    .session-date {
-      font-size: 12px;
-      color: #888;
-      margin-bottom: 4px;
-    }
-
-    .session-title {
-      font-weight: bold;
       font-size: 14px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      transition: 0.2s ease;
     }
 
-    #status {
-      margin-top: 10px;
-      color: #444;
+    button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
     }
 
-    #controls {
-      margin-bottom: 10px;
+    button.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
     }
 
-    #perf {
-      background: #fff;
-      border: 1px solid #ddd;
-      padding: 8px;
-      margin-bottom: 10px;
+    button.primary:hover {
+      filter: brightness(0.96);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 14px 16px;
+    }
+
+    .label {
       font-size: 12px;
-      white-space: pre-wrap;
-      color: #333;
+      color: var(--muted);
+      margin-bottom: 6px;
     }
 
-    #perfControls {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 10px;
+    .value {
+      font-size: 15px;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+
+    .status-ready {
+      color: #127c4f;
+    }
+
+    .status-error {
+      color: var(--danger);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .grid .card.full {
+      grid-column: 1 / -1;
+    }
+
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      min-height: 180px;
+      max-height: 360px;
+      overflow: auto;
+    }
+
+    @media (max-width: 800px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
 
 <body>
-  <div id="sidebar">
-    <div style="margin-bottom:10px; display:flex; flex-direction:column; gap:6px;">
-      <input id="username" placeholder="用户名" style="padding:6px;" />
-      <input id="password" placeholder="密码" type="password" style="padding:6px;" />
-      <div style="display:flex; gap:8px;">
-        <button id="loginBtn" style="flex:1;">登录</button>
-        <button id="registerBtn" style="flex:1;">注册</button>
-        <button id="logoutBtn" style="flex:1;">退出</button>
-      </div>
-      <div style="font-size:12px; color:#555;">当前用户：<span id="authUser">未登录</span></div>
+  <div class="page">
+    <div class="hero">
+      <h1>语音交互测试</h1>
+      <p>仅保留基础语音交互：创建会话、开始监听、停止监听、播放 TTS、查看识别与回复结果。</p>
     </div>
-    <button id="newChatBtn" style="width: 100%; margin-bottom: 10px;">+ 新对话</button>
-    <div style="font-weight: bold; color: #666;">历史记录 (最近5条)</div>
-    <ul id="sessionList"></ul>
-  </div>
 
-  <div id="main">
-    <h3>语音交互测试</h3>
-    <div id="controls">
-      <button id="startBtn">开始监听</button>
+    <div class="toolbar">
+      <button id="newSessionBtn">新建会话</button>
+      <button id="startBtn" class="primary">开始监听</button>
       <button id="stopBtn" disabled>停止监听</button>
-      <button id="probeBtn">探测TTS</button>
+      <button id="probeBtn">探测 TTS</button>
+      <button id="clearLogBtn">清空日志</button>
     </div>
-    <div id="perfControls">
-      <button id="downloadPerfJsonBtn">下载Perf JSON</button>
-      <button id="downloadPerfCsvBtn">下载Perf CSV</button>
-      <button id="clearPerfBtn">清空Perf</button>
+
+    <div class="meta">
+      <div class="card">
+        <div class="label">连接状态</div>
+        <div id="status" class="value">未连接</div>
+      </div>
+      <div class="card">
+        <div class="label">当前会话</div>
+        <div id="sessionId" class="value">尚未创建</div>
+      </div>
+      <div class="card">
+        <div class="label">匿名用户 ID</div>
+        <div id="userId" class="value"></div>
+      </div>
     </div>
-    <div id="status">未连接</div>
-    <div id="perf">Perf: 尚无数据</div>
-    <pre id="log" style="flex: 1; overflow:auto; background:#f5f5f5; padding:8px; border:1px solid #ddd"></pre>
+
+    <div class="grid">
+      <div class="card">
+        <div class="label">ASR 部分结果</div>
+        <div id="partialText" class="value">暂无</div>
+      </div>
+      <div class="card">
+        <div class="label">ASR 最终结果</div>
+        <div id="finalText" class="value">暂无</div>
+      </div>
+      <div class="card">
+        <div class="label">助手回复文本</div>
+        <div id="replyText" class="value">暂无</div>
+      </div>
+      <div class="card">
+        <div class="label">性能指标</div>
+        <pre id="perfText">暂无</pre>
+      </div>
+      <div class="card full">
+        <div class="label">运行日志</div>
+        <pre id="logText"></pre>
+      </div>
+    </div>
   </div>
 
   <script>
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
+    const probeBtn = document.getElementById('probeBtn');
+    const newSessionBtn = document.getElementById('newSessionBtn');
+    const clearLogBtn = document.getElementById('clearLogBtn');
+
     const statusEl = document.getElementById('status');
-    const sessionListEl = document.getElementById('sessionList');
-    const newChatBtn = document.getElementById('newChatBtn');
-    const usernameInput = document.getElementById('username');
-    const passwordInput = document.getElementById('password');
-    const loginBtn = document.getElementById('loginBtn');
-    const registerBtn = document.getElementById('registerBtn');
-    const logoutBtn = document.getElementById('logoutBtn');
-    const perfEl = document.getElementById('perf');
-    const downloadPerfJsonBtn = document.getElementById('downloadPerfJsonBtn');
-    const downloadPerfCsvBtn = document.getElementById('downloadPerfCsvBtn');
-    const clearPerfBtn = document.getElementById('clearPerfBtn');
+    const sessionIdEl = document.getElementById('sessionId');
+    const userIdEl = document.getElementById('userId');
+    const partialTextEl = document.getElementById('partialText');
+    const finalTextEl = document.getElementById('finalText');
+    const replyTextEl = document.getElementById('replyText');
+    const perfTextEl = document.getElementById('perfText');
+    const logTextEl = document.getElementById('logText');
 
     let ws = null;
     let audioCtx = null;
     let processor = null;
     let micStream = null;
     let inputSampleRate = 48000;
-    let chunkMs = 200;
-    let ttsSampleRate = 24000;
     let currentSessionId = null;
-    let userId = localStorage.getItem('voice_user_id');
-    let token = localStorage.getItem('voice_token');
-    let authUserId = null;
-    let perfHistory = [];
+    let ttsSampleRate = 24000;
+    let ttsPlaying = false;
+    let localSpeechChunks = 0;
+    let lastClientInterruptAt = 0;
 
+    let userId = localStorage.getItem('voice_user_id');
     if (!userId) {
-      userId = 'user_' + Math.random().toString(36).substring(2, 15);
+      userId = 'user_' + Math.random().toString(36).slice(2, 12);
       localStorage.setItem('voice_user_id', userId);
     }
+    userIdEl.textContent = userId;
 
-    function log(msg) { const el = document.getElementById('log'); el.textContent += (typeof msg === 'string' ? msg : JSON.stringify(msg)) + "\n"; el.scrollTop = el.scrollHeight; }
-    function renderPerf(metrics) {
-      if (!metrics) { perfEl.textContent = 'Perf: 尚无数据'; return; }
-      perfEl.textContent = 'Perf:\n' + JSON.stringify(metrics, null, 2);
+    function log(message) {
+      const line = typeof message === 'string' ? message : JSON.stringify(message, null, 2);
+      logTextEl.textContent += line + '\n';
+      logTextEl.scrollTop = logTextEl.scrollHeight;
     }
+
+    function setStatus(text, kind = 'normal') {
+      statusEl.textContent = text;
+      statusEl.className = 'value';
+      if (kind === 'ready') statusEl.classList.add('status-ready');
+      if (kind === 'error') statusEl.classList.add('status-error');
+    }
+
+    function resetPanels() {
+      partialTextEl.textContent = '暂无';
+      finalTextEl.textContent = '暂无';
+      replyTextEl.textContent = '暂无';
+      perfTextEl.textContent = '暂无';
+    }
+
     function downloadBlob(filename, content, type) {
       const blob = new Blob([content], { type: type || 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
@@ -189,88 +274,20 @@
       a.remove();
       URL.revokeObjectURL(url);
     }
-    function perfToCsv(rows) {
-      if (!rows || rows.length === 0) return '';
-      const keys = Object.keys(rows[0]);
-      const head = keys.join(',');
-      const body = rows.map(r => keys.map(k => JSON.stringify(r[k] ?? '')).join(',')).join('\n');
-      return head + '\n' + body;
-    }
-
-    // Fetch and display sessions
-    async function loadSessions() {
-      try {
-        const headers = token ? { Authorization: 'Bearer ' + token } : {};
-        const url = token ? `/api/sessions` : `/api/sessions?user_id=${userId}`;
-        const res = await fetch(url, { headers });
-        const data = await res.json();
-        renderSessions(data.sessions);
-      } catch (e) {
-        console.error("Failed to load sessions", e);
-      }
-    }
-
-    function renderSessions(sessions) {
-      sessionListEl.innerHTML = '';
-      sessions.forEach(s => {
-        const li = document.createElement('li');
-        li.className = 'session-item';
-        if (s.id === currentSessionId) li.classList.add('active');
-
-        const date = new Date(s.updated_at * 1000).toLocaleString();
-        li.innerHTML = `
-          <div class="session-date">${date}</div>
-          <div class="session-title">${s.title || '新对话'}</div>
-        `;
-        li.onclick = () => selectSession(s.id);
-        sessionListEl.appendChild(li);
-      });
-    }
-
-    function selectSession(sid) {
-      currentSessionId = sid;
-      loadSessions(); // Re-render to update active state
-      log(`Selected session: ${sid}`);
-    }
-
-    async function createSession() {
-      try {
-        const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = 'Bearer ' + token;
-        const res = await fetch('/api/sessions', {
-          method: 'POST',
-          headers,
-          body: token ? '{}' : JSON.stringify({ user_id: userId })
-        });
-        const data = await res.json();
-        return data.session_id;
-      } catch (e) {
-        log("Error creating session: " + e);
-        return null;
-      }
-    }
-
-    newChatBtn.onclick = async () => {
-      const sid = await createSession();
-      if (sid) {
-        selectSession(sid);
-      }
-    };
-
-    // Initialize
-    loadSessions();
 
     const pcmPlayer = (() => {
       let ctx = null;
       let node = null;
       let buffer = new Float32Array(0);
       let outRate = 48000;
-      function init() {
+
+      function ensureInit() {
+        if (ctx) return;
         ctx = new (window.AudioContext || window.webkitAudioContext)();
         outRate = ctx.sampleRate;
         node = ctx.createScriptProcessor(4096, 1, 1);
-        node.onaudioprocess = (e) => {
-          const out = e.outputBuffer.getChannelData(0);
+        node.onaudioprocess = (event) => {
+          const out = event.outputBuffer.getChannelData(0);
           const need = out.length;
           if (buffer.length >= need) {
             out.set(buffer.subarray(0, need));
@@ -281,47 +298,84 @@
         };
         node.connect(ctx.destination);
       }
+
       function pushPCM16(chunk, inRate = 16000) {
+        ensureInit();
         const int16 = new Int16Array(chunk.buffer, chunk.byteOffset, Math.floor(chunk.byteLength / 2));
-        const f = new Float32Array(int16.length);
-        for (let i = 0; i < int16.length; i++) f[i] = int16[i] / 32768;
+        const source = new Float32Array(int16.length);
+        for (let i = 0; i < int16.length; i += 1) source[i] = int16[i] / 32768;
+
         const ratio = outRate / inRate;
-        const outLen = Math.floor(f.length * ratio);
+        const outLen = Math.max(1, Math.floor(source.length * ratio));
         const out = new Float32Array(outLen);
-        for (let i = 0; i < outLen; i++) {
+        for (let i = 0; i < outLen; i += 1) {
           const srcPos = i / ratio;
           const idx = Math.floor(srcPos);
           const frac = srcPos - idx;
-          const s0 = f[idx] || 0;
-          const s1 = f[idx + 1] || s0;
+          const s0 = source[idx] || 0;
+          const s1 = source[idx + 1] || s0;
           out[i] = s0 + (s1 - s0) * frac;
         }
+
         const merged = new Float32Array(buffer.length + out.length);
         merged.set(buffer, 0);
         merged.set(out, buffer.length);
         buffer = merged;
       }
+
       function reset() {
         buffer = new Float32Array(0);
       }
-      return { init, pushPCM16, reset };
+
+      return { ensureInit, pushPCM16, reset };
     })();
+
+    async function createSession() {
+      const response = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.session_id) {
+        throw new Error(data.error || 'create_session_failed');
+      }
+      currentSessionId = data.session_id;
+      sessionIdEl.textContent = currentSessionId;
+      log({ event: 'session_created', session_id: currentSessionId });
+      return currentSessionId;
+    }
+
+    async function ensureSession() {
+      if (currentSessionId) return currentSessionId;
+      return createSession();
+    }
 
     async function start() {
       if (ws) return;
 
-      // Ensure session exists
-      if (!currentSessionId) {
-        log("No session selected, creating new one...");
-        currentSessionId = await createSession();
-        if (!currentSessionId) return;
-        loadSessions();
+      resetPanels();
+      pcmPlayer.ensureInit();
+
+      try {
+        await ensureSession();
+      } catch (error) {
+        setStatus('创建会话失败', 'error');
+        log({ event: 'session_error', detail: String(error) });
+        return;
       }
 
       try {
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-      } catch (e) {
-        statusEl.textContent = '麦克风权限被拒绝或不可用';
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+          },
+        });
+      } catch (error) {
+        setStatus('麦克风不可用或权限被拒绝', 'error');
+        log({ event: 'mic_error', detail: String(error) });
         return;
       }
 
@@ -329,16 +383,45 @@
       inputSampleRate = audioCtx.sampleRate;
       const source = audioCtx.createMediaStreamSource(micStream);
       processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
+      const chunkMs = 200;
+      const targetSamples = Math.floor(16000 * chunkMs / 1000);
       let acc = [];
       let accSamples = 0;
-      const targetSamples = Math.floor(16000 * chunkMs / 1000);
-      processor.onaudioprocess = (e) => {
+
+      processor.onaudioprocess = (event) => {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        const input = e.inputBuffer.getChannelData(0);
+        const input = event.inputBuffer.getChannelData(0);
+        let energySum = 0;
+        for (let i = 0; i < input.length; i += 1) {
+          energySum += Math.abs(input[i]);
+        }
+        const meanEnergy = input.length ? (energySum / input.length) : 0;
+        const nowMs = Date.now();
+        if (ttsPlaying && meanEnergy >= 0.018) {
+          localSpeechChunks += 1;
+        } else {
+          localSpeechChunks = 0;
+        }
+        if (
+          ttsPlaying
+          && localSpeechChunks >= 2
+          && nowMs - lastClientInterruptAt > 1200
+        ) {
+          try {
+            ws.send(JSON.stringify({ cmd: 'interrupt' }));
+            log({ event: 'client_interrupt', mean_energy: Number(meanEnergy.toFixed(4)) });
+          } catch (_) { }
+          lastClientInterruptAt = nowMs;
+          localSpeechChunks = 0;
+          ttsPlaying = false;
+          pcmPlayer.reset();
+        }
         const ratio = 16000 / inputSampleRate;
-        const outLen = Math.floor(input.length * ratio);
+        const outLen = Math.max(1, Math.floor(input.length * ratio));
         const out = new Float32Array(outLen);
-        for (let i = 0; i < outLen; i++) {
+
+        for (let i = 0; i < outLen; i += 1) {
           const srcPos = i / ratio;
           const idx = Math.floor(srcPos);
           const frac = srcPos - idx;
@@ -346,163 +429,168 @@
           const s1 = input[idx + 1] || s0;
           out[i] = s0 + (s1 - s0) * frac;
         }
+
         acc.push(out);
         accSamples += out.length;
+
         if (accSamples >= targetSamples) {
           const merged = new Float32Array(accSamples);
-          let off = 0;
-          for (const a of acc) { merged.set(a, off); off += a.length; }
-          acc = []; accSamples = 0;
+          let offset = 0;
+          for (const part of acc) {
+            merged.set(part, offset);
+            offset += part.length;
+          }
+          acc = [];
+          accSamples = 0;
+
           const int16 = new Int16Array(merged.length);
-          for (let i = 0; i < merged.length; i++) {
-            let s = Math.max(-1, Math.min(1, merged[i]));
-            int16[i] = s < 0 ? s * 32768 : s * 32767;
+          for (let i = 0; i < merged.length; i += 1) {
+            const sample = Math.max(-1, Math.min(1, merged[i]));
+            int16[i] = sample < 0 ? sample * 32768 : sample * 32767;
           }
           ws.send(new Uint8Array(int16.buffer));
         }
       };
+
       source.connect(processor);
       processor.connect(audioCtx.destination);
-      if (audioCtx.state === 'suspended') { try { await audioCtx.resume(); } catch (_) { } }
+      if (audioCtx.state === 'suspended') {
+        try { await audioCtx.resume(); } catch (_) { }
+      }
 
-      log({ event: 'user_id', id: userId, session_id: currentSessionId });
-
-      const origin = (window.location.origin && window.location.origin.startsWith('http')) ? window.location.origin : 'http://localhost:8000';
+      const origin = window.location.origin || 'http://localhost:8000';
       const wsUrl = new URL('/ws/voice', origin);
-      wsUrl.protocol = (wsUrl.protocol === 'https:') ? 'wss:' : 'ws:';
-      wsUrl.searchParams.append('session_id', currentSessionId);
-      if (token) wsUrl.searchParams.append('token', token);
-      if (!token && userId) wsUrl.searchParams.append('user_id', userId);
+      wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+      wsUrl.searchParams.set('session_id', currentSessionId);
+      wsUrl.searchParams.set('user_id', userId);
+
       ws = new WebSocket(wsUrl.href);
       ws.binaryType = 'arraybuffer';
-      ws.onopen = () => { statusEl.textContent = '已连接，开始推流'; log({ event: 'ws_open' }); };
-      ws.addEventListener('open', () => {
-        try { ws.send(JSON.stringify({ cmd: 'init' })); } catch (_) { }
-      });
-      ws.onclose = () => { statusEl.textContent = '连接关闭'; };
-      ws.onerror = () => { statusEl.textContent = '连接错误'; log({ event: 'ws_error' }); };
-      ws.onmessage = (ev) => {
-        if (typeof ev.data === 'string') {
+
+      ws.onopen = () => {
+        setStatus('已连接，开始监听', 'ready');
+        log({ event: 'ws_open', session_id: currentSessionId });
+      };
+
+      ws.onclose = () => {
+        setStatus('连接已关闭');
+        log({ event: 'ws_close' });
+        ws = null;
+      };
+
+      ws.onerror = () => {
+        setStatus('连接错误', 'error');
+        log({ event: 'ws_error' });
+      };
+
+      ws.onmessage = (event) => {
+        if (typeof event.data === 'string') {
           try {
-            const o = JSON.parse(ev.data);
-            if (o && o.event === 'tts_start' && typeof o.rate === 'number') {
-              ttsSampleRate = o.rate;
+            const payload = JSON.parse(event.data);
+            log(payload);
+
+            if (payload.event === 'session_error' || payload.event === 'voice_init_error' || payload.event === 'error') {
+              setStatus(payload.detail || payload.event, 'error');
             }
-            if (o && o.event === 'perf') {
-              const metrics = o.metrics || null;
-              renderPerf(metrics);
-              if (metrics) {
-                perfHistory.push({
-                  ts: new Date().toISOString(),
-                  session_id: currentSessionId,
-                  ...metrics
-                });
-              }
+            if (payload.event === 'tts_ready' || payload.event === 'asr_connected') {
+              setStatus('语音服务已就绪', 'ready');
             }
-            log(o);
-            if (o.event === 'llm_text' || o.event === 'tts_done') {
-              loadSessions();
+            if (payload.event === 'asr_partial') {
+              partialTextEl.textContent = payload.text || '暂无';
             }
-            if (o.event === 'tts_reset') {
+            if (payload.event === 'asr_text') {
+              finalTextEl.textContent = payload.text || '暂无';
+              partialTextEl.textContent = '暂无';
+            }
+            if (payload.event === 'llm_text') {
+              replyTextEl.textContent = payload.text || '暂无';
+            }
+            if (payload.event === 'perf') {
+              perfTextEl.textContent = JSON.stringify(payload.metrics || {}, null, 2);
+            }
+            if (payload.event === 'tts_start' && typeof payload.rate === 'number') {
+              ttsSampleRate = payload.rate;
+              ttsPlaying = true;
+            }
+            if (payload.event === 'tts_reset') {
+              ttsPlaying = false;
               pcmPlayer.reset();
             }
-          } catch (_) {
-            log(ev.data);
+            if (payload.event === 'tts_done' || payload.event === 'tts_interrupted') {
+              ttsPlaying = false;
+            }
+          } catch (error) {
+            log({ event: 'parse_error', detail: String(error), raw: event.data });
           }
         } else {
-          const arr = new Uint8Array(ev.data);
-          pcmPlayer.pushPCM16(arr, ttsSampleRate);
+          pcmPlayer.pushPCM16(new Uint8Array(event.data), ttsSampleRate);
         }
       };
-      pcmPlayer.init();
+
       startBtn.disabled = true;
       stopBtn.disabled = false;
     }
 
     function stop() {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ cmd: 'stop' }));
+        try { ws.send(JSON.stringify({ cmd: 'stop' })); } catch (_) { }
       }
-      if (processor) { processor.disconnect(); processor = null; }
-      if (audioCtx) { audioCtx.close(); audioCtx = null; }
-      if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-      if (ws) { ws.close(); ws = null; }
-      pcmPlayer.reset(); // Clear audio buffer to prevent stuttering
+      if (processor) {
+        processor.disconnect();
+        processor = null;
+      }
+      if (audioCtx) {
+        audioCtx.close();
+        audioCtx = null;
+      }
+      if (micStream) {
+        micStream.getTracks().forEach(track => track.stop());
+        micStream = null;
+      }
+      if (ws) {
+        ws.close();
+        ws = null;
+      }
+      ttsPlaying = false;
+      localSpeechChunks = 0;
+      pcmPlayer.reset();
       startBtn.disabled = false;
       stopBtn.disabled = true;
-      statusEl.textContent = '未连接';
+      setStatus('未连接');
     }
+
+    async function probeTts() {
+      const origin = window.location.origin || 'http://localhost:8000';
+      const probeUrl = new URL('/api/tts_probe', origin);
+      try {
+        const response = await fetch(probeUrl.href);
+        const data = await response.json();
+        log(data);
+      } catch (error) {
+        log({ event: 'probe_error', detail: String(error) });
+      }
+    }
+
+    newSessionBtn.onclick = async () => {
+      if (ws) stop();
+      resetPanels();
+      try {
+        await createSession();
+      } catch (error) {
+        setStatus('创建会话失败', 'error');
+        log({ event: 'session_error', detail: String(error) });
+      }
+    };
 
     startBtn.onclick = start;
     stopBtn.onclick = stop;
-    document.getElementById('probeBtn').onclick = async () => {
-      const origin = (window.location.origin && window.location.origin.startsWith('http')) ? window.location.origin : 'http://localhost:8000';
-      const probeUrl = new URL('/api/tts_probe', origin);
-      try {
-        const r = await fetch(probeUrl.href);
-        const j = await r.json();
-        log(j);
-      } catch (e) {
-        log({ event: 'probe_error', detail: String(e) });
-      }
+    probeBtn.onclick = probeTts;
+    clearLogBtn.onclick = () => {
+      logTextEl.textContent = '';
     };
 
-    async function refreshAuthState() {
-      const el = document.getElementById('authUser');
-      if (token) {
-        try {
-          const r = await fetch('/api/me', { headers: { Authorization: 'Bearer ' + token } });
-          const j = await r.json();
-          if (j && j.ok) { authUserId = j.user_id; el.textContent = authUserId; }
-          else { authUserId = null; el.textContent = '未登录'; }
-        } catch (e) { authUserId = null; el.textContent = '未登录'; }
-      } else { authUserId = null; el.textContent = '未登录'; }
-    }
-
-    async function login() {
-      const u = usernameInput.value.trim();
-      const p = passwordInput.value;
-      if (!u || !p) { log('请输入用户名和密码'); return; }
-      try {
-        const r = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: u, password: p }) });
-        const j = await r.json();
-        if (j && j.ok) { token = j.token; localStorage.setItem('voice_token', token); log({ event: 'login_ok', userId: j.user_id }); await refreshAuthState(); loadSessions(); }
-        else { log({ event: 'login_error' }); }
-      } catch (e) { log({ event: 'login_error', detail: String(e) }); }
-    }
-
-    async function register() {
-      const u = usernameInput.value.trim();
-      const p = passwordInput.value;
-      if (!u || !p) { log('请输入用户名和密码'); return; }
-      try {
-        const r = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: u, password: p }) });
-        const j = await r.json();
-        if (j && j.ok) { token = j.token; localStorage.setItem('voice_token', token); log({ event: 'register_ok', userId: j.user_id }); await refreshAuthState(); loadSessions(); }
-        else { log({ event: 'register_error' }); }
-      } catch (e) { log({ event: 'register_error', detail: String(e) }); }
-    }
-
-    function logout() {
-      token = null; localStorage.removeItem('voice_token'); authUserId = null; log({ event: 'logout_ok' }); refreshAuthState(); loadSessions(); }
-
-    loginBtn.onclick = login;
-    registerBtn.onclick = register;
-    logoutBtn.onclick = logout;
-    downloadPerfJsonBtn.onclick = () => {
-      const name = `perf_${currentSessionId || 'session'}_${Date.now()}.json`;
-      downloadBlob(name, JSON.stringify(perfHistory, null, 2), 'application/json');
-    };
-    downloadPerfCsvBtn.onclick = () => {
-      const name = `perf_${currentSessionId || 'session'}_${Date.now()}.csv`;
-      downloadBlob(name, perfToCsv(perfHistory), 'text/csv');
-    };
-    clearPerfBtn.onclick = () => {
-      perfHistory = [];
-      renderPerf(null);
-      log({ event: 'perf_cleared' });
-    };
-    refreshAuthState();
+    setStatus('未连接');
+    sessionIdEl.textContent = '尚未创建';
   </script>
 </body>
 

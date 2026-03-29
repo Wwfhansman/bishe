@@ -132,6 +132,9 @@ class AppStateProvider with ChangeNotifier {
           audioPlayService.startStream(sampleRate: rate);
         } else if (json['event'] == 'tts_done') {
           isAIPlayback = false;
+        } else if (json['event'] == 'tts_interrupted') {
+          audioPlayService.reset();
+          isAIPlayback = false;
         } else if (json['event'] == 'tts_reset') {
           audioPlayService.reset();
           isAIPlayback = false;
@@ -199,7 +202,7 @@ class AppStateProvider with ChangeNotifier {
   }
 
   void interruptAI() {
-    webSocketService.sendStop();
+    webSocketService.sendInterrupt();
     audioPlayService.reset();
     isAIPlayback = false;
     notifyListeners();

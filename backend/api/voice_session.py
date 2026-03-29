@@ -4,12 +4,9 @@ import queue
 import re
 import threading
 import time
-from collections import deque
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass
 from typing import Optional
 
-import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 
 try:
@@ -19,62 +16,21 @@ except Exception:
 
 from .. import database
 from ..config import (
-    BARGE_IN_ADAPTIVE_ENERGY_MARGIN,
-    BARGE_IN_CONFIRM_SCORE,
-    BARGE_IN_ECHO_SUPPRESSION_WINDOW_MS,
-    BARGE_IN_ENABLED,
-    BARGE_IN_FALLBACK_SENSITIVITY,
-    BARGE_IN_FRAME_MS,
-    BARGE_IN_MIN_SPEECH_MS,
-    BARGE_IN_NOISE_FLOOR,
-    BARGE_IN_NOISE_FLOOR_ALPHA,
-    BARGE_IN_PENDING_SCORE,
-    BARGE_IN_SILENCE_END_FRAMES,
-    BARGE_IN_SILENCE_RESET_FRAMES,
-    BARGE_IN_SPEECH_RATIO_WINDOW,
-    BARGE_IN_START_FRAMES,
-    BARGE_IN_TTS_COOLDOWN_MS,
     GREETING_TEXT,
     LLM_SYSTEM_PROMPT,
     RATE as ASR_RATE,
 )
 from ..llm.llm_client import LLMClient
-from ..voice import AudioChunk, create_stt_service, create_tts_service, load_voice_registry
-
-
-class SpeechState(str, Enum):
-    IDLE = "idle"
-    SPEAKING = "speaking"
-    INTERRUPT_PENDING = "interrupt_pending"
-    INTERRUPTED = "interrupted"
-
-
-@dataclass
-class BargeInState:
-    enabled: bool = BARGE_IN_ENABLED
-    min_speech_ms: int = BARGE_IN_MIN_SPEECH_MS
-    start_frames: int = BARGE_IN_START_FRAMES
-    silence_end_frames: int = BARGE_IN_SILENCE_END_FRAMES
-    silence_reset_frames: int = BARGE_IN_SILENCE_RESET_FRAMES
-    frame_ms: int = BARGE_IN_FRAME_MS
-    fallback_sensitivity: int = BARGE_IN_FALLBACK_SENSITIVITY
-    noise_floor: float = BARGE_IN_NOISE_FLOOR
-    noise_floor_alpha: float = BARGE_IN_NOISE_FLOOR_ALPHA
-    adaptive_energy_margin: float = BARGE_IN_ADAPTIVE_ENERGY_MARGIN
-    pending_score: float = BARGE_IN_PENDING_SCORE
-    confirm_score: float = BARGE_IN_CONFIRM_SCORE
-    tts_cooldown_ms: int = BARGE_IN_TTS_COOLDOWN_MS
-    echo_suppression_window_ms: int = BARGE_IN_ECHO_SUPPRESSION_WINDOW_MS
-    speech_ratio_window: int = BARGE_IN_SPEECH_RATIO_WINDOW
-    speaking_frames: int = 0
-    silence_frames: int = 0
-    speech_state: SpeechState = SpeechState.IDLE
-    vad_buf: bytes = b""
-    recent_speech_flags: deque[int] = field(default_factory=deque)
-    last_frame_energy: float = 0.0
-    last_score: float = 0.0
-    last_speech_ratio: float = 0.0
-    last_echo_risk: float = 0.0
+from ..voice import (
+    AdaptiveBargeInDetector,
+    AudioChunk,
+    BargeInEventKind,
+    SpeechState,
+    StreamingNoiseSuppressor,
+    create_stt_service,
+    create_tts_service,
+    load_voice_registry,
+)
 
 
 @dataclass
@@ -95,7 +51,7 @@ class VoiceSessionRunner:
         self.llm = LLMClient()
 
         self.out_audio_q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=64)
-        self.reply_q: queue.Queue[Optional[ReplyTask]] = queue.Queue()
+        self.reply_q: queue.Queue[Optional[ReplyTask]] = queue.Queue(maxsize=4)
         self.reply_stop_evt = threading.Event()
         self.reply_thread: Optional[threading.Thread] = None
         self.tts_lock = threading.Lock()
@@ -109,6 +65,7 @@ class VoiceSessionRunner:
         self.cooldown_sec = 5.0
         self.last_tts_end_time = 0.0
         self.last_tts_chunk_time = 0.0
+        self.last_tts_start_time = 0.0
 
         self.perf_asr_partial_ts: Optional[float] = None
         self.perf_asr_final_ts: Optional[float] = None
@@ -119,8 +76,10 @@ class VoiceSessionRunner:
         self.perf_tts_first_chunk_ts: Optional[float] = None
         self.perf_tts_end_ts: Optional[float] = None
 
-        self.barge_in = BargeInState()
-        self.frame_bytes = int(ASR_RATE * self.barge_in.frame_ms / 1000) * 2
+        self.barge_in_detector = AdaptiveBargeInDetector(sample_rate=ASR_RATE)
+        self.barge_in = self.barge_in_detector.state
+        self.frame_bytes = self.barge_in_detector.frame_bytes
+        self.noise_suppressor = StreamingNoiseSuppressor(sample_rate=ASR_RATE)
         self.use_native_vad = _webrtcvad is not None
         self.vad = _webrtcvad.Vad(3) if self.use_native_vad else None
 
@@ -135,7 +94,7 @@ class VoiceSessionRunner:
         self.reply_thread.start()
 
         if len(self.history) == 0:
-            self.reply_q.put(ReplyTask(kind="greeting", text=GREETING_TEXT))
+            self._enqueue_reply_task(ReplyTask(kind="greeting", text=GREETING_TEXT))
 
         await self._send_text_obj({"event": "tts_ready"})
 
@@ -197,6 +156,31 @@ class VoiceSessionRunner:
             except asyncio.QueueEmpty:
                 break
 
+    def _enqueue_reply_task(self, task: ReplyTask) -> None:
+        try:
+            self.reply_q.put_nowait(task)
+            return
+        except queue.Full:
+            pass
+
+        retained: list[Optional[ReplyTask]] = []
+        while True:
+            try:
+                queued = self.reply_q.get_nowait()
+            except queue.Empty:
+                break
+            if queued is None or queued.kind == "greeting":
+                retained.append(queued)
+        for item in retained:
+            try:
+                self.reply_q.put_nowait(item)
+            except queue.Full:
+                break
+        try:
+            self.reply_q.put_nowait(task)
+        except queue.Full:
+            pass
+
     def _normalize_text(self, text: str) -> str:
         try:
             return re.sub(r"[\s，。！？,.!?:;；]+", "", text).lower()
@@ -204,72 +188,34 @@ class VoiceSessionRunner:
             return text
 
     def _energy_is_speech(self, frame: bytes) -> bool:
-        energy = self._frame_energy(frame)
-        threshold = (
-            6.0 if self.barge_in.fallback_sensitivity == 0
-            else 5.0 if self.barge_in.fallback_sensitivity == 1
-            else 4.0 if self.barge_in.fallback_sensitivity == 2
-            else 3.0
-        )
-        return energy > self.barge_in.noise_floor * threshold
+        return self.barge_in_detector.energy_is_speech(frame)
 
     def _frame_energy(self, frame: bytes) -> float:
-        samples = np.frombuffer(frame, dtype=np.int16)
-        if samples.size == 0:
-            return 0.0
-        return float(np.mean(np.abs(samples)))
+        return self.barge_in_detector.frame_energy(frame)
 
     def _update_noise_floor(self, energy: float, is_speech: bool) -> None:
-        alpha = self.barge_in.noise_floor_alpha
-        if is_speech:
-            alpha *= 0.25
-        if self.barge_in.speech_state == SpeechState.SPEAKING:
-            alpha *= 0.5
-        self.barge_in.noise_floor = (
-            self.barge_in.noise_floor * (1.0 - alpha) + energy * alpha
-        )
-        self.barge_in.noise_floor = max(50.0, self.barge_in.noise_floor)
+        self.barge_in_detector.update_noise_floor(energy, is_speech)
 
     def _append_speech_flag(self, is_speech: bool) -> float:
-        self.barge_in.recent_speech_flags.append(1 if is_speech else 0)
-        while len(self.barge_in.recent_speech_flags) > self.barge_in.speech_ratio_window:
-            self.barge_in.recent_speech_flags.popleft()
-        if not self.barge_in.recent_speech_flags:
-            return 0.0
-        return sum(self.barge_in.recent_speech_flags) / len(self.barge_in.recent_speech_flags)
+        return self.barge_in_detector.append_speech_flag(is_speech)
 
     def _echo_risk(self) -> float:
-        if self.barge_in.speech_state == SpeechState.IDLE and self.last_tts_chunk_time <= 0:
-            return 0.0
-        elapsed_ms = (time.time() - max(self.last_tts_chunk_time, self.last_tts_end_time)) * 1000
-        if elapsed_ms <= 0:
-            return 1.0
-        if elapsed_ms >= self.barge_in.echo_suppression_window_ms:
-            return 0.0
-        return 1.0 - (elapsed_ms / self.barge_in.echo_suppression_window_ms)
+        return self.barge_in_detector.echo_risk(
+            last_tts_chunk_time=self.last_tts_chunk_time,
+            last_tts_end_time=self.last_tts_end_time,
+        )
 
     def _barge_in_score(self, is_speech: bool, energy: float, speech_ratio: float, echo_risk: float) -> float:
-        noise_floor = max(self.barge_in.noise_floor, 1.0)
-        energy_gain = max(0.0, (energy - noise_floor) / noise_floor)
-        energy_score = min(1.5, energy_gain / max(self.barge_in.adaptive_energy_margin, 0.05))
-        vad_score = 0.8 if is_speech else 0.0
-        ratio_score = min(1.0, speech_ratio * 1.2)
-        echo_penalty = echo_risk * 0.9
-        score = vad_score + energy_score + ratio_score - echo_penalty
-        return max(0.0, score)
+        return self.barge_in_detector.score(is_speech, energy, speech_ratio, echo_risk)
 
     def _confirm_frames_required(self, score: float) -> int:
-        base_frames = max(1, self.barge_in.min_speech_ms // self.barge_in.frame_ms)
-        if score >= self.barge_in.confirm_score + 0.75:
-            return max(1, base_frames // 3)
-        if score >= self.barge_in.confirm_score + 0.35:
-            return max(1, base_frames // 2)
-        return base_frames
+        return self.barge_in_detector.confirm_frames_required(score)
 
-    def _interrupt_now(self) -> None:
-        if self.barge_in.speech_state != SpeechState.SPEAKING:
+    def _interrupt_now(self, force: bool = False) -> None:
+        if not force and self.barge_in.speech_state != SpeechState.SPEAKING:
             return
         self.send_enabled = False
+        self._clear_out_audio_q()
         if self.loop is not None:
             asyncio.run_coroutine_threadsafe(
                 self._send_text_obj({"event": "tts_reset"}),
@@ -277,14 +223,37 @@ class VoiceSessionRunner:
             )
         self.barge_in.speech_state = SpeechState.INTERRUPT_PENDING
 
-    def _confirm_interrupt(self) -> None:
+    def _confirm_interrupt(self, force: bool = False) -> None:
+        if not force and self.barge_in.speech_state == SpeechState.INTERRUPTED:
+            return
         self.barge_in.speech_state = SpeechState.INTERRUPTED
         try:
             if self.tts is not None:
                 self.tts.stop()
         except Exception:
             pass
+        self._clear_out_audio_q()
+        self.last_tts_end_time = time.time()
+        self.last_tts_chunk_time = self.last_tts_end_time
+        self.last_tts_start_time = 0.0
         if self.loop is not None:
+            asyncio.run_coroutine_threadsafe(
+                self._send_text_obj(
+                    {
+                        "event": "barge_in",
+                        "speech_state": self.barge_in.speech_state.value,
+                        "score": round(self.barge_in.last_score, 3),
+                        "speech_ratio": round(self.barge_in.last_speech_ratio, 3),
+                        "echo_risk": round(self.barge_in.last_echo_risk, 3),
+                        "noise_floor": round(self.barge_in.noise_floor, 2),
+                        "peak_gate": round(self.barge_in.last_peak_gate, 2),
+                        "peak_frames": self.barge_in.peak_frames,
+                        "max_peak_run": self.barge_in.max_peak_run,
+                        "ts": time.time(),
+                    }
+                ),
+                self.loop,
+            )
             asyncio.run_coroutine_threadsafe(
                 self._send_text_obj({"event": "tts_interrupted"}),
                 self.loop,
@@ -292,11 +261,7 @@ class VoiceSessionRunner:
 
     def _resume_play(self) -> None:
         self.send_enabled = True
-        self.barge_in.speech_state = SpeechState.SPEAKING
-        self.barge_in.speaking_frames = 0
-        self.barge_in.silence_frames = 0
-        self.barge_in.vad_buf = b""
-        self.barge_in.recent_speech_flags.clear()
+        self.barge_in_detector.reset_runtime(speech_state=SpeechState.SPEAKING)
 
     def _stop_current_tts(self) -> None:
         self.send_enabled = False
@@ -311,16 +276,14 @@ class VoiceSessionRunner:
                 self._send_text_obj({"event": "tts_reset"}),
                 self.loop,
             )
-        self.barge_in.speech_state = SpeechState.IDLE
-        self.barge_in.speaking_frames = 0
-        self.barge_in.silence_frames = 0
-        self.barge_in.vad_buf = b""
-        self.barge_in.recent_speech_flags.clear()
+        self.barge_in_detector.reset_runtime(speech_state=SpeechState.IDLE)
         self.last_tts_end_time = time.time()
         self.last_tts_chunk_time = self.last_tts_end_time
+        self.last_tts_start_time = 0.0
         self.send_enabled = True
 
     def _reply_worker(self) -> None:
+        # LLM requests and TTS synthesis are intentionally kept off the event loop.
         while not self.reply_stop_evt.is_set():
             try:
                 task = self.reply_q.get(timeout=0.2)
@@ -337,15 +300,13 @@ class VoiceSessionRunner:
                 print(f"Reply worker error: {e}")
 
     def _handle_reply(self, text: str) -> None:
-        now = time.time()
-        if now - self.last_tts_end_time < 1.5:
-            return
-
         key_norm = self._normalize_text(text)
-        ts_prev = self.last_seen.get(key_norm)
-        if ts_prev is not None and (now - ts_prev) < self.cooldown_sec:
-            return
-        self.last_seen[key_norm] = now
+        # Only deduplicate assistant greetings; user repeats should still be processed.
+        if text.strip() == GREETING_TEXT.strip():
+            ts_prev = self.last_seen.get(key_norm)
+            if ts_prev is not None and (time.time() - ts_prev) < self.cooldown_sec:
+                return
+            self.last_seen[key_norm] = time.time()
 
         database.add_message(self.session_id, "user", text)
         self.history.append({"role": "user", "content": text})
@@ -402,11 +363,8 @@ class VoiceSessionRunner:
                 with self.perf_lock:
                     self.perf_tts_start_ts = time.perf_counter()
                     self.perf_tts_first_chunk_ts = None
-                self.barge_in.speech_state = SpeechState.SPEAKING
-                self.barge_in.speaking_frames = 0
-                self.barge_in.silence_frames = 0
-                self.barge_in.vad_buf = b""
-                self.barge_in.recent_speech_flags.clear()
+                self.barge_in_detector.reset_runtime(speech_state=SpeechState.SPEAKING)
+                self.last_tts_start_time = time.time()
                 if self.tts is None:
                     raise RuntimeError("TTS not initialized")
                 try:
@@ -420,8 +378,12 @@ class VoiceSessionRunner:
                         self.loop,
                     )
                 count = 0
+                interrupted_early = False
                 self.send_enabled = True
                 for chunk in self.tts.synthesize_stream(text):
+                    if not self.send_enabled:
+                        interrupted_early = True
+                        break
                     if getattr(chunk, "is_final", False):
                         break
                     data = getattr(chunk, "pcm16_bytes", b"")
@@ -440,17 +402,19 @@ class VoiceSessionRunner:
                         )
                 self.last_tts_end_time = time.time()
                 self.last_tts_chunk_time = self.last_tts_end_time
-                self.barge_in.speech_state = SpeechState.IDLE
+                self.last_tts_start_time = 0.0
+                self.barge_in_detector.reset_runtime(speech_state=SpeechState.IDLE)
                 with self.perf_lock:
                     self.perf_tts_end_ts = time.perf_counter()
-                if self.loop is not None:
+                if self.loop is not None and not interrupted_early:
                     asyncio.run_coroutine_threadsafe(
                         self._send_text_obj({"event": "tts_done", "count": count}),
                         self.loop,
                     )
             except Exception as e:
-                self.barge_in.speech_state = SpeechState.IDLE
+                self.barge_in_detector.reset_runtime(speech_state=SpeechState.IDLE)
                 self.last_tts_end_time = time.time()
+                self.last_tts_start_time = 0.0
                 with self.perf_lock:
                     self.perf_tts_end_ts = time.perf_counter()
                 if self.loop is not None:
@@ -526,11 +490,24 @@ class VoiceSessionRunner:
                         if not isinstance(result.text, str) or not result.text.strip():
                             continue
                         if result.is_final:
+                            if (
+                                self.last_tts_start_time > 0
+                                and self.barge_in.speech_state in {SpeechState.SPEAKING, SpeechState.INTERRUPT_PENDING}
+                            ):
+                                self._interrupt_now(force=True)
+                                self._confirm_interrupt(force=True)
                             with self.perf_lock:
                                 self.perf_asr_final_ts = time.perf_counter()
                             await self._send_text_obj({"event": "asr_text", "text": result.text})
-                            self.reply_q.put(ReplyTask(kind="reply", text=result.text))
+                            self._enqueue_reply_task(ReplyTask(kind="reply", text=result.text))
                         else:
+                            if (
+                                self.last_tts_start_time > 0
+                                and self.barge_in.speech_state in {SpeechState.SPEAKING, SpeechState.INTERRUPT_PENDING}
+                                and len(result.text.strip()) >= 2
+                            ):
+                                self._interrupt_now(force=True)
+                                self._confirm_interrupt(force=True)
                             with self.perf_lock:
                                 if self.perf_asr_partial_ts is None:
                                     self.perf_asr_partial_ts = time.perf_counter()
@@ -545,63 +522,38 @@ class VoiceSessionRunner:
         try:
             while True:
                 chunk = await self.out_audio_q.get()
-                if self.send_enabled:
-                    await self.websocket.send_bytes(chunk)
+                if not self.send_enabled:
+                    self._clear_out_audio_q()
+                    continue
+                await self.websocket.send_bytes(chunk)
         except WebSocketDisconnect:
             return
         except Exception:
             return
 
     def _handle_barge_in(self, audio_bytes: bytes) -> None:
-        if not self.barge_in.enabled:
-            return
-        in_cooldown = (
-            self.last_tts_end_time > 0
-            and (time.time() - self.last_tts_end_time) * 1000 < self.barge_in.tts_cooldown_ms
-        )
-        if in_cooldown:
-            return
-
-        self.barge_in.vad_buf += audio_bytes
-        while len(self.barge_in.vad_buf) >= self.frame_bytes:
-            frame = self.barge_in.vad_buf[:self.frame_bytes]
-            self.barge_in.vad_buf = self.barge_in.vad_buf[self.frame_bytes:]
+        def detect_speech(frame: bytes) -> bool:
             try:
-                is_speech = self.vad.is_speech(frame, ASR_RATE) if self.use_native_vad else self._energy_is_speech(frame)
+                if self.use_native_vad and self.vad is not None:
+                    return bool(self.vad.is_speech(frame, ASR_RATE))
+                return self._energy_is_speech(frame)
             except Exception:
-                is_speech = False
-            energy = self._frame_energy(frame)
-            speech_ratio = self._append_speech_flag(is_speech)
-            echo_risk = self._echo_risk()
-            score = self._barge_in_score(is_speech, energy, speech_ratio, echo_risk)
-            self.barge_in.last_frame_energy = energy
-            self.barge_in.last_speech_ratio = speech_ratio
-            self.barge_in.last_echo_risk = echo_risk
-            self.barge_in.last_score = score
+                return False
 
-            if is_speech:
-                self.barge_in.speaking_frames += 1
-                self.barge_in.silence_frames = 0
-                if (
-                    self.barge_in.speech_state == SpeechState.SPEAKING
-                    and self.barge_in.speaking_frames >= self.barge_in.start_frames
-                    and score >= self.barge_in.pending_score
-                ):
-                    self._interrupt_now()
-                if self.barge_in.speech_state == SpeechState.INTERRUPT_PENDING:
-                    confirm_frames = self._confirm_frames_required(score)
-                    if self.barge_in.speaking_frames >= confirm_frames and score >= self.barge_in.confirm_score:
-                        self._confirm_interrupt()
-            else:
-                self.barge_in.silence_frames += 1
-                if self.barge_in.silence_frames > self.barge_in.silence_reset_frames:
-                    self.barge_in.speaking_frames = 0
-                if (
-                    self.barge_in.speech_state == SpeechState.INTERRUPT_PENDING
-                    and self.barge_in.silence_frames >= self.barge_in.silence_end_frames
-                ):
-                    self._resume_play()
-            self._update_noise_floor(energy, is_speech)
+        events = self.barge_in_detector.process_audio(
+            audio_bytes=audio_bytes,
+            detect_speech=detect_speech,
+            last_tts_chunk_time=self.last_tts_chunk_time,
+            last_tts_end_time=self.last_tts_end_time,
+            tts_start_time=self.last_tts_start_time,
+        )
+        for event in events:
+            if event.kind == BargeInEventKind.PENDING:
+                self._interrupt_now(force=True)
+            elif event.kind == BargeInEventKind.CONFIRMED:
+                self._confirm_interrupt(force=True)
+            elif event.kind == BargeInEventKind.RESUMED:
+                self._resume_play()
 
     async def _handle_text_command(self, payload: str) -> None:
         try:
@@ -613,6 +565,11 @@ class VoiceSessionRunner:
             if self.stt is not None:
                 self.stt.reset()
             self._stop_current_tts()
+            return
+
+        if data.get("cmd") == "interrupt":
+            self._interrupt_now(force=True)
+            self._confirm_interrupt(force=True)
             return
 
         if data.get("cmd") == "interrupt_config":
@@ -663,8 +620,45 @@ class VoiceSessionRunner:
                     "last_score": round(self.barge_in.last_score, 3),
                     "speech_ratio": round(self.barge_in.last_speech_ratio, 3),
                     "echo_risk": round(self.barge_in.last_echo_risk, 3),
+                    "peak_gate": round(self.barge_in.last_peak_gate, 2),
+                    "peak_frames": self.barge_in.peak_frames,
+                    "max_peak_run": self.barge_in.max_peak_run,
+                    "pending_tts_elapsed_ms": round(self.barge_in.pending_tts_elapsed_ms, 2) if self.barge_in.pending_tts_elapsed_ms is not None else None,
+                    "late_window_ms": self.barge_in.late_window_ms,
                 }
             )
+            return
+
+        if data.get("cmd") == "noise_suppression_config":
+            changed = self.noise_suppressor.update_config(
+                enabled=data.get("enable"),
+                noise_floor=data.get("noise_floor"),
+                noise_alpha=data.get("noise_alpha"),
+                spectral_alpha=data.get("spectral_alpha"),
+                min_gain=data.get("min_gain"),
+                over_subtraction=data.get("over_subtraction"),
+                speech_margin=data.get("speech_margin"),
+            )
+            if data.get("reset") is True:
+                self.noise_suppressor.reset()
+                changed = True
+            await self._send_text_obj(
+                {
+                    "event": "noise_suppression_config_ok",
+                    "changed": changed,
+                    "noise_suppression": self.noise_suppressor.collect_metrics(),
+                }
+            )
+            return
+
+        if data.get("cmd") == "noise_suppression_status":
+            await self._send_text_obj(
+                {
+                    "event": "noise_suppression_status",
+                    "noise_suppression": self.noise_suppressor.collect_metrics(),
+                }
+            )
+            return
 
     async def _receive_loop(self) -> None:
         while True:
@@ -675,15 +669,27 @@ class VoiceSessionRunner:
                 continue
             if msg.get("bytes") is not None:
                 audio_bytes = msg["bytes"]
-                self._handle_barge_in(audio_bytes)
+                processed_audio = self.noise_suppressor.process(audio_bytes)
                 self.recv_bytes += len(audio_bytes)
                 self.recv_chunks += 1
                 if self.recv_chunks % 10 == 0:
-                    await self._send_text_obj({"event": "audio_stats", "chunks": self.recv_chunks, "bytes": self.recv_bytes})
+                    await self._send_text_obj(
+                        {
+                            "event": "audio_stats",
+                            "chunks": self.recv_chunks,
+                            "bytes": self.recv_bytes,
+                            "noise_suppression": self.noise_suppressor.collect_metrics(),
+                        }
+                    )
+                if not processed_audio:
+                    continue
+                self._handle_barge_in(processed_audio)
                 try:
                     if self.stt is None:
                         raise RuntimeError("STT not initialized")
-                    self.stt.accept_audio(AudioChunk(pcm16_bytes=audio_bytes, sample_rate=ASR_RATE, channels=1))
+                    self.stt.accept_audio(
+                        AudioChunk(pcm16_bytes=processed_audio, sample_rate=ASR_RATE, channels=1)
+                    )
                 except Exception as e:
                     await self._send_text_obj({"event": "error", "stage": "asr_send", "detail": str(e)})
                     break
@@ -714,3 +720,4 @@ class VoiceSessionRunner:
                 self.tts.close()
         except Exception:
             pass
+        self.noise_suppressor.reset()

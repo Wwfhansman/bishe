@@ -121,6 +121,29 @@ def test_handle_text_command_stop_resets_stt_and_tts():
         asyncio.set_event_loop(None)
 
 
+def test_handle_text_command_interrupt_stops_tts_without_resetting_stt():
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        websocket = DummyWebSocket()
+        runner = VoiceSessionRunner(websocket=websocket, session_id="session-id")
+        runner.loop = loop
+        runner.tts = DummyTts()
+        runner.stt = DummyStt()
+        runner.barge_in.speech_state = SpeechState.SPEAKING
+
+        loop.run_until_complete(runner._handle_text_command('{"cmd":"interrupt"}'))
+        loop.run_until_complete(asyncio.sleep(0))
+
+        events = [msg["event"] for msg in websocket.text_messages]
+        assert runner.stt.reset_calls == 0
+        assert runner.tts.stop_calls == 1
+        assert "tts_interrupted" in events
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
 def test_handle_text_command_interrupt_status_reports_explicit_state():
     loop = asyncio.new_event_loop()
     try:
@@ -137,6 +160,50 @@ def test_handle_text_command_interrupt_status_reports_explicit_state():
         assert status["speech_state"] == SpeechState.INTERRUPT_PENDING.value
         assert status["pausepending"] is True
         assert status["confirmed"] is False
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
+def test_handle_text_command_noise_suppression_status_reports_metrics():
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        websocket = DummyWebSocket()
+        runner = VoiceSessionRunner(websocket=websocket, session_id="session-id")
+        runner.loop = loop
+
+        loop.run_until_complete(runner._handle_text_command('{"cmd":"noise_suppression_status"}'))
+
+        status = websocket.text_messages[-1]
+        assert status["event"] == "noise_suppression_status"
+        assert "noise_suppression" in status
+        assert "enabled" in status["noise_suppression"]
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
+def test_handle_text_command_noise_suppression_config_updates_runtime():
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        websocket = DummyWebSocket()
+        runner = VoiceSessionRunner(websocket=websocket, session_id="session-id")
+        runner.loop = loop
+
+        loop.run_until_complete(
+            runner._handle_text_command(
+                '{"cmd":"noise_suppression_config","enable":true,"noise_floor":950,"min_gain":0.45,"reset":true}'
+            )
+        )
+
+        status = websocket.text_messages[-1]
+        assert status["event"] == "noise_suppression_config_ok"
+        assert status["noise_suppression"]["enabled"] is True
+        assert status["noise_suppression"]["noise_floor"] == 950.0
+        assert status["noise_suppression"]["min_gain"] == 0.45
+        assert status["noise_suppression"]["processed_frames"] == 0
     finally:
         loop.close()
         asyncio.set_event_loop(None)

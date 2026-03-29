@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from backend import database
 from backend.api.voice_session import SpeechState, VoiceSessionRunner
+from backend.voice import NoiseSuppressorState, StreamingNoiseSuppressor
 
 
 class DummyWebSocket:
@@ -67,15 +68,53 @@ def make_runner(force_energy_only: bool) -> VoiceSessionRunner:
     return runner
 
 
+def apply_noise_suppression(
+    pcm: bytes,
+    sample_rate: int,
+    enabled: bool,
+    config: Optional[Dict[str, Any]] = None,
+) -> tuple[bytes, Optional[dict[str, Any]]]:
+    if not enabled:
+        return pcm, None
+    state = NoiseSuppressorState(enabled=True)
+    suppressor = StreamingNoiseSuppressor(state=state, sample_rate=sample_rate)
+    cfg = config or {}
+    suppressor.update_config(
+        enabled=True,
+        noise_floor=cfg.get("noise_floor"),
+        noise_alpha=cfg.get("noise_alpha"),
+        spectral_alpha=cfg.get("spectral_alpha"),
+        min_gain=cfg.get("min_gain"),
+        over_subtraction=cfg.get("over_subtraction"),
+        speech_margin=cfg.get("speech_margin"),
+    )
+    enhanced = suppressor.process(pcm) + suppressor.flush()
+    metrics = suppressor.collect_metrics()
+    metrics["input_energy"] = round(suppressor.frame_energy(pcm), 2)
+    metrics["output_energy"] = round(suppressor.frame_energy(enhanced), 2)
+    return enhanced, metrics
+
+
 def evaluate_sample(
     sample: Dict[str, Any],
     manifest_dir: Path,
     force_energy_only: bool,
+    noise_suppression_enabled: bool = False,
+    noise_suppression_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     wav_path = Path(sample["path"])
     if not wav_path.is_absolute():
         wav_path = (manifest_dir / wav_path).resolve()
     pcm = read_wav_int16_mono(wav_path)
+    merged_noise_cfg = dict(noise_suppression_config or {})
+    if isinstance(sample.get("noise_suppression_config"), dict):
+        merged_noise_cfg.update(sample["noise_suppression_config"])
+    processed_pcm, ns_metrics = apply_noise_suppression(
+        pcm=pcm,
+        sample_rate=16000,
+        enabled=noise_suppression_enabled,
+        config=merged_noise_cfg,
+    )
 
     runner = make_runner(force_energy_only=force_energy_only)
     if isinstance(sample.get("config"), dict):
@@ -93,8 +132,8 @@ def evaluate_sample(
     max_score = 0.0
     frame_bytes = runner.frame_bytes
 
-    for idx in range(0, len(pcm), frame_bytes):
-        frame = pcm[idx : idx + frame_bytes]
+    for idx in range(0, len(processed_pcm), frame_bytes):
+        frame = processed_pcm[idx : idx + frame_bytes]
         if len(frame) < frame_bytes:
             frame = frame + b"\x00" * (frame_bytes - len(frame))
 
@@ -129,6 +168,7 @@ def evaluate_sample(
         "latency_delta_ms": latency_delta_ms,
         "max_score": round(max_score, 3),
         "final_state": runner.barge_in.speech_state.value,
+        "noise_suppression": ns_metrics,
     }
 
 
@@ -172,22 +212,81 @@ def main() -> None:
     ap.add_argument("manifest", help="JSONL manifest. Each line should contain path and label/expected_interrupt.")
     ap.add_argument("--output-json", help="Optional path to save evaluation result JSON.")
     ap.add_argument("--force-energy-only", action="store_true", help="Disable webrtcvad and evaluate energy fallback only.")
+    ap.add_argument("--with-noise-suppression", action="store_true", help="Run evaluation on noise-suppressed audio.")
+    ap.add_argument("--compare-noise-suppression", action="store_true", help="Run both raw and noise-suppressed evaluation.")
+    ap.add_argument("--noise-floor", type=float, default=None)
+    ap.add_argument("--noise-alpha", type=float, default=None)
+    ap.add_argument("--spectral-alpha", type=float, default=None)
+    ap.add_argument("--min-gain", type=float, default=None)
+    ap.add_argument("--over-subtraction", type=float, default=None)
+    ap.add_argument("--speech-margin", type=float, default=None)
     args = ap.parse_args()
 
     database.init_db()
     manifest_path = Path(args.manifest).resolve()
     samples = iter_manifest(manifest_path)
-    results = [
-        evaluate_sample(sample, manifest_path.parent, force_energy_only=args.force_energy_only)
-        for sample in samples
-    ]
-    summary = summarize(results)
-    payload = {
-        "manifest": str(manifest_path),
-        "force_energy_only": args.force_energy_only,
-        "summary": summary,
-        "results": results,
+    noise_cfg = {
+        "noise_floor": args.noise_floor,
+        "noise_alpha": args.noise_alpha,
+        "spectral_alpha": args.spectral_alpha,
+        "min_gain": args.min_gain,
+        "over_subtraction": args.over_subtraction,
+        "speech_margin": args.speech_margin,
     }
+
+    if args.compare_noise_suppression:
+        raw_results = [
+            evaluate_sample(
+                sample,
+                manifest_path.parent,
+                force_energy_only=args.force_energy_only,
+                noise_suppression_enabled=False,
+            )
+            for sample in samples
+        ]
+        enhanced_results = [
+            evaluate_sample(
+                sample,
+                manifest_path.parent,
+                force_energy_only=args.force_energy_only,
+                noise_suppression_enabled=True,
+                noise_suppression_config=noise_cfg,
+            )
+            for sample in samples
+        ]
+        payload = {
+            "manifest": str(manifest_path),
+            "force_energy_only": args.force_energy_only,
+            "compare_noise_suppression": True,
+            "noise_suppression_config": noise_cfg,
+            "raw": {
+                "summary": summarize(raw_results),
+                "results": raw_results,
+            },
+            "enhanced": {
+                "summary": summarize(enhanced_results),
+                "results": enhanced_results,
+            },
+        }
+    else:
+        results = [
+            evaluate_sample(
+                sample,
+                manifest_path.parent,
+                force_energy_only=args.force_energy_only,
+                noise_suppression_enabled=args.with_noise_suppression,
+                noise_suppression_config=noise_cfg,
+            )
+            for sample in samples
+        ]
+        payload = {
+            "manifest": str(manifest_path),
+            "force_energy_only": args.force_energy_only,
+            "noise_suppression_enabled": args.with_noise_suppression,
+            "noise_suppression_config": noise_cfg if args.with_noise_suppression else None,
+            "summary": summarize(results),
+            "results": results,
+        }
 
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     if args.output_json:

@@ -13,8 +13,18 @@ except Exception:
 
 DB_PATH = env("DB_PATH", "voice_assistant.db")
 
+
+def _connect(*, row_factory: bool = False) -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=5)
+    if row_factory:
+        conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA busy_timeout = 5000;")
+    return conn
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     c = conn.cursor()
     # Enable foreign keys
     c.execute("PRAGMA foreign_keys = ON;")
@@ -63,7 +73,7 @@ def init_db():
     conn.close()
 
 def create_session(user_id: str, title: str = "New Chat") -> str:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     c = conn.cursor()
     
     # Check session count
@@ -85,8 +95,7 @@ def create_session(user_id: str, title: str = "New Chat") -> str:
     return session_id
 
 def get_user_sessions(user_id: str) -> List[Dict]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = _connect(row_factory=True)
     c = conn.cursor()
     c.execute("SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC", (user_id,))
     rows = c.fetchall()
@@ -94,8 +103,7 @@ def get_user_sessions(user_id: str) -> List[Dict]:
     return [dict(row) for row in rows]
 
 def get_session_history(session_id: str, limit: int = 20) -> List[Dict]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = _connect(row_factory=True)
     c = conn.cursor()
     c.execute("SELECT role, content FROM conversations WHERE session_id = ? ORDER BY id ASC", (session_id,))
     rows = c.fetchall()
@@ -105,7 +113,7 @@ def get_session_history(session_id: str, limit: int = 20) -> List[Dict]:
 
 
 def get_session_owner(session_id: str) -> Optional[str]:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     c = conn.cursor()
     c.execute("SELECT user_id FROM sessions WHERE id = ?", (session_id,))
     row = c.fetchone()
@@ -122,7 +130,7 @@ def session_belongs_to(session_id: str, user_id: Optional[str]) -> bool:
     return owner == user_id
 
 def add_message(session_id: str, role: str, content: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     c = conn.cursor()
     now = time.time()
     
@@ -146,7 +154,7 @@ def add_message(session_id: str, role: str, content: str):
     conn.close()
 
 def clear_history(session_id: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     c = conn.cursor()
     c.execute("DELETE FROM conversations WHERE session_id = ?", (session_id,))
     conn.commit()
@@ -154,9 +162,8 @@ def clear_history(session_id: str):
 
 def delete_session(session_id: str, user_id: Optional[str] = None) -> bool:
     """删除会话及其关联的所有对话记录（级联删除）"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     c = conn.cursor()
-    c.execute("PRAGMA foreign_keys = ON")
     if user_id:
         c.execute("SELECT id FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
     else:
@@ -174,12 +181,23 @@ def delete_session(session_id: str, user_id: Optional[str] = None) -> bool:
 def _hash_password(pw: str) -> str:
     import os, hashlib, base64
     salt = os.urandom(16)
-    h = hashlib.sha256(salt + pw.encode()).digest()
-    return base64.urlsafe_b64encode(salt + h).decode()
+    iterations = 120_000
+    h = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, iterations)
+    return "pbkdf2_sha256${}${}${}".format(
+        iterations,
+        base64.urlsafe_b64encode(salt).decode(),
+        base64.urlsafe_b64encode(h).decode(),
+    )
 
 def _verify_password(stored: str, pw: str) -> bool:
     import hashlib, base64
     try:
+        if stored.startswith("pbkdf2_sha256$"):
+            _, iterations_str, salt_b64, hash_b64 = stored.split("$", 3)
+            salt = base64.urlsafe_b64decode(salt_b64.encode())
+            expected = base64.urlsafe_b64decode(hash_b64.encode())
+            actual = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, int(iterations_str))
+            return actual == expected
         b = base64.urlsafe_b64decode(stored.encode())
         salt = b[:16]
         h = b[16:]
@@ -188,7 +206,7 @@ def _verify_password(stored: str, pw: str) -> bool:
         return False
 
 def create_user(username: str, password: str) -> Optional[str]:
-    conn = sqlite3.connect(DB_PATH)
+    conn = _connect()
     c = conn.cursor()
     now = time.time()
     try:
@@ -206,8 +224,7 @@ def create_user(username: str, password: str) -> Optional[str]:
         conn.close()
 
 def validate_user(username: str, password: str) -> Optional[str]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = _connect(row_factory=True)
     c = conn.cursor()
     c.execute("SELECT id, password_hash FROM users WHERE username = ?", (username,))
     row = c.fetchone()
@@ -219,8 +236,7 @@ def validate_user(username: str, password: str) -> Optional[str]:
     return None
 
 def ensure_user_wechat(openid: str) -> Optional[str]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = _connect(row_factory=True)
     c = conn.cursor()
     c.execute("SELECT id FROM users WHERE wechat_openid = ?", (openid,))
     row = c.fetchone()

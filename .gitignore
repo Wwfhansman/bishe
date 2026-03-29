@@ -31,3 +31,19 @@ Thumbs.db
 
 # Node
 node_modules/
+
+# Local thesis drafts
+论文正文/
+
+# Samples
+samples/
+
+audio/
+
+tools/
+
+.venv39/
+
+.dotnet-cli/
+
+.pipcache_test/

@@ -62,6 +62,11 @@ class WebSocketService {
     sendJson({'cmd': 'stop'});
   }
 
+  /// Interrupt current TTS but keep the conversation flow alive
+  void sendInterrupt() {
+    sendJson({'cmd': 'interrupt'});
+  }
+
   /// Disconnect web socket completely
   void disconnect() {
     _subscription?.cancel();
