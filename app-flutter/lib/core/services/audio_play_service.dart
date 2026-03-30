@@ -65,7 +65,6 @@ class AudioPlayService {
   // Instantly discard any queued audio (used when AI is interrupted)
   Future<void> reset() async {
     await stop();
-    await startStream(sampleRate: _currentSampleRate);
   }
 
   void dispose() {

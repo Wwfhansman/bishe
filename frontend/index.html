@@ -233,8 +233,7 @@
     let currentSessionId = null;
     let ttsSampleRate = 24000;
     let ttsPlaying = false;
-    let localSpeechChunks = 0;
-    let lastClientInterruptAt = 0;
+    let currentAssistantTurnId = null;
 
     let userId = localStorage.getItem('voice_user_id');
     if (!userId) {
@@ -392,31 +391,6 @@
       processor.onaudioprocess = (event) => {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         const input = event.inputBuffer.getChannelData(0);
-        let energySum = 0;
-        for (let i = 0; i < input.length; i += 1) {
-          energySum += Math.abs(input[i]);
-        }
-        const meanEnergy = input.length ? (energySum / input.length) : 0;
-        const nowMs = Date.now();
-        if (ttsPlaying && meanEnergy >= 0.018) {
-          localSpeechChunks += 1;
-        } else {
-          localSpeechChunks = 0;
-        }
-        if (
-          ttsPlaying
-          && localSpeechChunks >= 2
-          && nowMs - lastClientInterruptAt > 1200
-        ) {
-          try {
-            ws.send(JSON.stringify({ cmd: 'interrupt' }));
-            log({ event: 'client_interrupt', mean_energy: Number(meanEnergy.toFixed(4)) });
-          } catch (_) { }
-          lastClientInterruptAt = nowMs;
-          localSpeechChunks = 0;
-          ttsPlaying = false;
-          pcmPlayer.reset();
-        }
         const ratio = 16000 / inputSampleRate;
         const outLen = Math.max(1, Math.floor(input.length * ratio));
         const out = new Float32Array(outLen);
@@ -505,25 +479,37 @@
             if (payload.event === 'llm_text') {
               replyTextEl.textContent = payload.text || '暂无';
             }
+            if (payload.event === 'llm_error') {
+              replyTextEl.textContent = payload.fallback_text || '大模型暂时不可用';
+            }
             if (payload.event === 'perf') {
               perfTextEl.textContent = JSON.stringify(payload.metrics || {}, null, 2);
             }
             if (payload.event === 'tts_start' && typeof payload.rate === 'number') {
               ttsSampleRate = payload.rate;
               ttsPlaying = true;
+              currentAssistantTurnId = payload.assistant_turn_id ?? null;
             }
             if (payload.event === 'tts_reset') {
-              ttsPlaying = false;
-              pcmPlayer.reset();
+              if (currentAssistantTurnId == null || payload.assistant_turn_id == null || payload.assistant_turn_id === currentAssistantTurnId) {
+                ttsPlaying = false;
+                currentAssistantTurnId = null;
+                pcmPlayer.reset();
+              }
             }
             if (payload.event === 'tts_done' || payload.event === 'tts_interrupted') {
-              ttsPlaying = false;
+              if (currentAssistantTurnId == null || payload.assistant_turn_id == null || payload.assistant_turn_id === currentAssistantTurnId) {
+                ttsPlaying = false;
+                currentAssistantTurnId = null;
+              }
             }
           } catch (error) {
             log({ event: 'parse_error', detail: String(error), raw: event.data });
           }
         } else {
-          pcmPlayer.pushPCM16(new Uint8Array(event.data), ttsSampleRate);
+          if (ttsPlaying && currentAssistantTurnId != null) {
+            pcmPlayer.pushPCM16(new Uint8Array(event.data), ttsSampleRate);
+          }
         }
       };
 
@@ -552,7 +538,7 @@
         ws = null;
       }
       ttsPlaying = false;
-      localSpeechChunks = 0;
+      currentAssistantTurnId = null;
       pcmPlayer.reset();
       startBtn.disabled = false;
       stopBtn.disabled = true;

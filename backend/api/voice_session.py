@@ -50,7 +50,7 @@ class VoiceSessionRunner:
         self.tts = None
         self.llm = LLMClient()
 
-        self.out_audio_q: asyncio.Queue[bytes] = asyncio.Queue(maxsize=64)
+        self.out_audio_q: asyncio.Queue[tuple[int, bytes]] = asyncio.Queue(maxsize=64)
         self.reply_q: queue.Queue[Optional[ReplyTask]] = queue.Queue(maxsize=4)
         self.reply_stop_evt = threading.Event()
         self.reply_thread: Optional[threading.Thread] = None
@@ -66,6 +66,14 @@ class VoiceSessionRunner:
         self.last_tts_end_time = 0.0
         self.last_tts_chunk_time = 0.0
         self.last_tts_start_time = 0.0
+        self._next_assistant_turn_id = 0
+        self._active_assistant_turn_id: Optional[int] = None
+        self._turn_start_buf = b""
+        self._turn_start_speech_frames = 0
+        self._suppressed_partial: Optional[tuple[str, float]] = None
+        self._suppressed_final: Optional[tuple[str, float]] = None
+        self._last_forwarded_asr_final_norm = ""
+        self._last_forwarded_asr_final_ts = 0.0
 
         self.perf_asr_partial_ts: Optional[float] = None
         self.perf_asr_final_ts: Optional[float] = None
@@ -93,8 +101,7 @@ class VoiceSessionRunner:
         self.reply_thread = threading.Thread(target=self._reply_worker, daemon=True)
         self.reply_thread.start()
 
-        if len(self.history) == 0:
-            self._enqueue_reply_task(ReplyTask(kind="greeting", text=GREETING_TEXT))
+        self._enqueue_reply_task(ReplyTask(kind="greeting", text=GREETING_TEXT))
 
         await self._send_text_obj({"event": "tts_ready"})
 
@@ -132,22 +139,22 @@ class VoiceSessionRunner:
         except Exception:
             pass
 
-    def _enqueue_audio_chunk(self, chunk: bytes) -> None:
+    def _enqueue_audio_chunk(self, turn_id: int, chunk: bytes) -> None:
         try:
-            self.out_audio_q.put_nowait(chunk)
+            self.out_audio_q.put_nowait((turn_id, chunk))
         except asyncio.QueueFull:
             try:
                 self.out_audio_q.get_nowait()
             except asyncio.QueueEmpty:
                 pass
             try:
-                self.out_audio_q.put_nowait(chunk)
+                self.out_audio_q.put_nowait((turn_id, chunk))
             except asyncio.QueueFull:
                 pass
 
-    def _put_audio(self, chunk: bytes) -> None:
-        if self.send_enabled and self.loop is not None:
-            self.loop.call_soon_threadsafe(self._enqueue_audio_chunk, chunk)
+    def _put_audio(self, turn_id: int, chunk: bytes) -> None:
+        if self.send_enabled and self.loop is not None and self._active_assistant_turn_id == turn_id:
+            self.loop.call_soon_threadsafe(self._enqueue_audio_chunk, turn_id, chunk)
 
     def _clear_out_audio_q(self) -> None:
         while True:
@@ -155,6 +162,67 @@ class VoiceSessionRunner:
                 self.out_audio_q.get_nowait()
             except asyncio.QueueEmpty:
                 break
+
+    def _reset_turn_start_gate(self) -> None:
+        self._turn_start_buf = b""
+        self._turn_start_speech_frames = 0
+
+    def _reset_suppressed_asr(self) -> None:
+        self._suppressed_partial = None
+        self._suppressed_final = None
+
+    def _begin_assistant_turn(self) -> int:
+        self._next_assistant_turn_id += 1
+        turn_id = self._next_assistant_turn_id
+        self._active_assistant_turn_id = turn_id
+        self.send_enabled = True
+        self._reset_turn_start_gate()
+        self._reset_suppressed_asr()
+        self.barge_in_detector.reset_runtime(speech_state=SpeechState.SPEAKING)
+        self.last_tts_start_time = time.time()
+        return turn_id
+
+    def _finish_assistant_turn(self, turn_id: int, interrupted: bool = False) -> bool:
+        if self._active_assistant_turn_id != turn_id:
+            return False
+        self.last_tts_end_time = time.time()
+        self.last_tts_chunk_time = self.last_tts_end_time
+        self.last_tts_start_time = 0.0
+        self._active_assistant_turn_id = None
+        self._reset_turn_start_gate()
+        if interrupted:
+            self.barge_in_detector.reset_runtime(speech_state=SpeechState.INTERRUPTED)
+            self.send_enabled = False
+        else:
+            self.barge_in_detector.reset_runtime(speech_state=SpeechState.IDLE)
+            self._reset_suppressed_asr()
+        return True
+
+    def _should_skip_final_text(self, text: str) -> bool:
+        now = time.time()
+        norm = self._normalize_text(text)
+        if norm and norm == self._last_forwarded_asr_final_norm and (now - self._last_forwarded_asr_final_ts) < 2.0:
+            return True
+        self._last_forwarded_asr_final_norm = norm
+        self._last_forwarded_asr_final_ts = now
+        return False
+
+    async def _forward_final_text(self, text: str) -> None:
+        if self._should_skip_final_text(text):
+            return
+        with self.perf_lock:
+            self.perf_asr_final_ts = time.perf_counter()
+        await self._send_text_obj({"event": "asr_text", "text": text})
+        self._enqueue_reply_task(ReplyTask(kind="reply", text=text))
+
+    async def _flush_suppressed_final_if_any(self) -> None:
+        if not self._suppressed_final:
+            return
+        text, ts = self._suppressed_final
+        self._reset_suppressed_asr()
+        if not text.strip() or (time.time() - ts) > 2.0:
+            return
+        await self._forward_final_text(text)
 
     def _enqueue_reply_task(self, task: ReplyTask) -> None:
         try:
@@ -214,11 +282,12 @@ class VoiceSessionRunner:
     def _interrupt_now(self, force: bool = False) -> None:
         if not force and self.barge_in.speech_state != SpeechState.SPEAKING:
             return
+        turn_id = self._active_assistant_turn_id
         self.send_enabled = False
         self._clear_out_audio_q()
         if self.loop is not None:
             asyncio.run_coroutine_threadsafe(
-                self._send_text_obj({"event": "tts_reset"}),
+                self._send_text_obj({"event": "tts_reset", "assistant_turn_id": turn_id}),
                 self.loop,
             )
         self.barge_in.speech_state = SpeechState.INTERRUPT_PENDING
@@ -226,6 +295,7 @@ class VoiceSessionRunner:
     def _confirm_interrupt(self, force: bool = False) -> None:
         if not force and self.barge_in.speech_state == SpeechState.INTERRUPTED:
             return
+        turn_id = self._active_assistant_turn_id
         self.barge_in.speech_state = SpeechState.INTERRUPTED
         try:
             if self.tts is not None:
@@ -233,14 +303,13 @@ class VoiceSessionRunner:
         except Exception:
             pass
         self._clear_out_audio_q()
-        self.last_tts_end_time = time.time()
-        self.last_tts_chunk_time = self.last_tts_end_time
-        self.last_tts_start_time = 0.0
+        self._finish_assistant_turn(turn_id or -1, interrupted=True)
         if self.loop is not None:
             asyncio.run_coroutine_threadsafe(
                 self._send_text_obj(
                     {
                         "event": "barge_in",
+                        "assistant_turn_id": turn_id,
                         "speech_state": self.barge_in.speech_state.value,
                         "score": round(self.barge_in.last_score, 3),
                         "speech_ratio": round(self.barge_in.last_speech_ratio, 3),
@@ -255,15 +324,17 @@ class VoiceSessionRunner:
                 self.loop,
             )
             asyncio.run_coroutine_threadsafe(
-                self._send_text_obj({"event": "tts_interrupted"}),
+                self._send_text_obj({"event": "tts_interrupted", "assistant_turn_id": turn_id}),
                 self.loop,
             )
+            asyncio.run_coroutine_threadsafe(self._flush_suppressed_final_if_any(), self.loop)
 
     def _resume_play(self) -> None:
         self.send_enabled = True
         self.barge_in_detector.reset_runtime(speech_state=SpeechState.SPEAKING)
 
     def _stop_current_tts(self) -> None:
+        turn_id = self._active_assistant_turn_id
         self.send_enabled = False
         self._clear_out_audio_q()
         try:
@@ -273,13 +344,10 @@ class VoiceSessionRunner:
             pass
         if self.loop is not None:
             asyncio.run_coroutine_threadsafe(
-                self._send_text_obj({"event": "tts_reset"}),
+                self._send_text_obj({"event": "tts_reset", "assistant_turn_id": turn_id}),
                 self.loop,
             )
-        self.barge_in_detector.reset_runtime(speech_state=SpeechState.IDLE)
-        self.last_tts_end_time = time.time()
-        self.last_tts_chunk_time = self.last_tts_end_time
-        self.last_tts_start_time = 0.0
+        self._finish_assistant_turn(turn_id or -1)
         self.send_enabled = True
 
     def _reply_worker(self) -> None:
@@ -311,7 +379,7 @@ class VoiceSessionRunner:
         database.add_message(self.session_id, "user", text)
         self.history.append({"role": "user", "content": text})
 
-        reply = text
+        reply_text: Optional[str] = None
         try:
             rag_t0 = time.perf_counter()
             rag_text = self._build_rag_context(text)
@@ -321,27 +389,36 @@ class VoiceSessionRunner:
                 self.perf_llm_start_ts = time.perf_counter()
             sys_prompt = LLM_SYSTEM_PROMPT if not rag_text else LLM_SYSTEM_PROMPT + "\n" + rag_text
             recent_hist = self.history[-7:-1] if len(self.history) > 6 else self.history[:-1]
-            reply = self.llm.chat(text, system=sys_prompt, history=recent_hist)
+            reply_text = self.llm.chat(text, system=sys_prompt, history=recent_hist)
             with self.perf_lock:
                 self.perf_llm_end_ts = time.perf_counter()
             if self.loop is not None:
                 asyncio.run_coroutine_threadsafe(
-                    self._send_text_obj({"event": "llm_text", "text": reply}),
+                    self._send_text_obj({"event": "llm_text", "text": reply_text}),
                     self.loop,
                 )
-            database.add_message(self.session_id, "assistant", reply)
-            self.history.append({"role": "assistant", "content": reply})
-            self.last_seen[self._normalize_text(reply)] = time.time()
+            database.add_message(self.session_id, "assistant", reply_text)
+            self.history.append({"role": "assistant", "content": reply_text})
+            self.last_seen[self._normalize_text(reply_text)] = time.time()
         except Exception as e:
+            reply_text = "我刚刚没连上大模型，请再说一遍。"
             if self.loop is not None:
                 asyncio.run_coroutine_threadsafe(
                     self._send_text_obj(
-                        {"event": "llm_error", "fallback_text": reply, "detail": str(e)}
+                        {"event": "llm_error", "fallback_text": reply_text, "detail": str(e)}
                     ),
                     self.loop,
                 )
+                asyncio.run_coroutine_threadsafe(
+                    self._send_text_obj({"event": "llm_text", "text": reply_text}),
+                    self.loop,
+                )
+            database.add_message(self.session_id, "assistant", reply_text)
+            self.history.append({"role": "assistant", "content": reply_text})
+            self.last_seen[self._normalize_text(reply_text)] = time.time()
 
-        self._speak_text(reply)
+        if reply_text:
+            self._speak_text(reply_text)
         self._emit_perf_metrics()
 
     def _build_rag_context(self, text: str) -> Optional[str]:
@@ -363,8 +440,7 @@ class VoiceSessionRunner:
                 with self.perf_lock:
                     self.perf_tts_start_ts = time.perf_counter()
                     self.perf_tts_first_chunk_ts = None
-                self.barge_in_detector.reset_runtime(speech_state=SpeechState.SPEAKING)
-                self.last_tts_start_time = time.time()
+                turn_id = self._begin_assistant_turn()
                 if self.tts is None:
                     raise RuntimeError("TTS not initialized")
                 try:
@@ -374,14 +450,13 @@ class VoiceSessionRunner:
                     pass
                 if self.loop is not None:
                     asyncio.run_coroutine_threadsafe(
-                        self._send_text_obj({"event": "tts_start", "rate": self.tts.sample_rate}),
+                        self._send_text_obj({"event": "tts_start", "rate": self.tts.sample_rate, "assistant_turn_id": turn_id}),
                         self.loop,
                     )
                 count = 0
                 interrupted_early = False
-                self.send_enabled = True
                 for chunk in self.tts.synthesize_stream(text):
-                    if not self.send_enabled:
+                    if not self.send_enabled or self._active_assistant_turn_id != turn_id:
                         interrupted_early = True
                         break
                     if getattr(chunk, "is_final", False):
@@ -394,27 +469,24 @@ class VoiceSessionRunner:
                     with self.perf_lock:
                         if self.perf_tts_first_chunk_ts is None:
                             self.perf_tts_first_chunk_ts = time.perf_counter()
-                    self._put_audio(data)
+                    self._put_audio(turn_id, data)
                     if count % 5 == 0 and self.loop is not None:
                         asyncio.run_coroutine_threadsafe(
-                            self._send_text_obj({"event": "tts_chunk", "count": count}),
+                            self._send_text_obj({"event": "tts_chunk", "count": count, "assistant_turn_id": turn_id}),
                             self.loop,
                         )
-                self.last_tts_end_time = time.time()
-                self.last_tts_chunk_time = self.last_tts_end_time
-                self.last_tts_start_time = 0.0
-                self.barge_in_detector.reset_runtime(speech_state=SpeechState.IDLE)
+                finished_normally = self._finish_assistant_turn(turn_id, interrupted=interrupted_early)
                 with self.perf_lock:
                     self.perf_tts_end_ts = time.perf_counter()
-                if self.loop is not None and not interrupted_early:
+                if self.loop is not None and finished_normally and not interrupted_early:
                     asyncio.run_coroutine_threadsafe(
-                        self._send_text_obj({"event": "tts_done", "count": count}),
+                        self._send_text_obj({"event": "tts_done", "count": count, "assistant_turn_id": turn_id}),
                         self.loop,
                     )
             except Exception as e:
-                self.barge_in_detector.reset_runtime(speech_state=SpeechState.IDLE)
-                self.last_tts_end_time = time.time()
-                self.last_tts_start_time = 0.0
+                active_turn_id = self._active_assistant_turn_id
+                if active_turn_id is not None:
+                    self._finish_assistant_turn(active_turn_id)
                 with self.perf_lock:
                     self.perf_tts_end_ts = time.perf_counter()
                 if self.loop is not None:
@@ -471,8 +543,9 @@ class VoiceSessionRunner:
 
     def _play_greeting(self, text: str) -> None:
         try:
-            database.add_message(self.session_id, "assistant", text)
-            self.history.append({"role": "assistant", "content": text})
+            if len(self.history) == 0:
+                database.add_message(self.session_id, "assistant", text)
+                self.history.append({"role": "assistant", "content": text})
             self._speak_text(text)
         except Exception as e:
             if self.loop is not None:
@@ -489,21 +562,25 @@ class VoiceSessionRunner:
                     for result in results:
                         if not isinstance(result.text, str) or not result.text.strip():
                             continue
+                        assistant_speaking = self.last_tts_start_time > 0
+                        detector_open = self.barge_in.speech_state in {
+                            SpeechState.INTERRUPT_PENDING,
+                            SpeechState.INTERRUPTED,
+                        } or not self.send_enabled
                         if result.is_final:
-                            if (
-                                self.last_tts_start_time > 0
-                                and self.barge_in.speech_state in {SpeechState.SPEAKING, SpeechState.INTERRUPT_PENDING}
-                            ):
+                            if assistant_speaking and not detector_open:
+                                self._suppressed_final = (result.text, time.time())
+                                continue
+                            if assistant_speaking:
                                 self._interrupt_now(force=True)
                                 self._confirm_interrupt(force=True)
-                            with self.perf_lock:
-                                self.perf_asr_final_ts = time.perf_counter()
-                            await self._send_text_obj({"event": "asr_text", "text": result.text})
-                            self._enqueue_reply_task(ReplyTask(kind="reply", text=result.text))
+                            await self._forward_final_text(result.text)
                         else:
+                            if assistant_speaking and not detector_open:
+                                self._suppressed_partial = (result.text, time.time())
+                                continue
                             if (
-                                self.last_tts_start_time > 0
-                                and self.barge_in.speech_state in {SpeechState.SPEAKING, SpeechState.INTERRUPT_PENDING}
+                                assistant_speaking
                                 and len(result.text.strip()) >= 2
                             ):
                                 self._interrupt_now(force=True)
@@ -521,9 +598,8 @@ class VoiceSessionRunner:
     async def _sender(self) -> None:
         try:
             while True:
-                chunk = await self.out_audio_q.get()
-                if not self.send_enabled:
-                    self._clear_out_audio_q()
+                turn_id, chunk = await self.out_audio_q.get()
+                if not self.send_enabled or self._active_assistant_turn_id != turn_id:
                     continue
                 await self.websocket.send_bytes(chunk)
         except WebSocketDisconnect:
@@ -540,6 +616,8 @@ class VoiceSessionRunner:
             except Exception:
                 return False
 
+        self._reset_turn_start_gate()
+
         events = self.barge_in_detector.process_audio(
             audio_bytes=audio_bytes,
             detect_speech=detect_speech,
@@ -549,8 +627,9 @@ class VoiceSessionRunner:
         )
         for event in events:
             if event.kind == BargeInEventKind.PENDING:
-                self._interrupt_now(force=True)
+                continue
             elif event.kind == BargeInEventKind.CONFIRMED:
+                self._interrupt_now(force=True)
                 self._confirm_interrupt(force=True)
             elif event.kind == BargeInEventKind.RESUMED:
                 self._resume_play()
@@ -610,6 +689,7 @@ class VoiceSessionRunner:
             await self._send_text_obj(
                 {
                     "event": "interrupt_status",
+                    "assistant_turn_id": self._active_assistant_turn_id,
                     "enable": self.barge_in.enabled,
                     "min_speech_ms": self.barge_in.min_speech_ms,
                     "pausepending": self.barge_in.speech_state == SpeechState.INTERRUPT_PENDING,

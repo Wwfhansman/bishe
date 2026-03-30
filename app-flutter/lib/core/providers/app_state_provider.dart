@@ -24,6 +24,7 @@ class AppStateProvider with ChangeNotifier {
   VoiceConnectionState connectionState = VoiceConnectionState.disconnected;
   bool isRecording = false;
   bool isAIPlayback = false;
+  int? currentAssistantTurnId;
 
   String asrText = "";
   String llmText = "";
@@ -122,28 +123,46 @@ class AppStateProvider with ChangeNotifier {
       await audioPlayService.init();
 
       webSocketService.onJsonMessage = (json) {
+        final event = json['event']?.toString();
+        if (event != null) {
+          debugPrint('WS_EVENT $event ${json.toString()}');
+        }
         if (json['event'] == 'asr_text') {
           asrText = json['text'] ?? '';
         } else if (json['event'] == 'llm_text') {
           llmText = json['text'] ?? '';
+        } else if (json['event'] == 'llm_error') {
+          llmText = json['fallback_text'] ?? '我刚刚没连上大模型，请再说一遍。';
+          lastErrorMessage = json['detail']?.toString();
         } else if (json['event'] == 'tts_start') {
           isAIPlayback = true;
+          currentAssistantTurnId = json['assistant_turn_id'];
           final rate = json['rate'] ?? 24000;
           audioPlayService.startStream(sampleRate: rate);
         } else if (json['event'] == 'tts_done') {
-          isAIPlayback = false;
+          if (currentAssistantTurnId == null || json['assistant_turn_id'] == null || json['assistant_turn_id'] == currentAssistantTurnId) {
+            isAIPlayback = false;
+            currentAssistantTurnId = null;
+          }
         } else if (json['event'] == 'tts_interrupted') {
-          audioPlayService.reset();
-          isAIPlayback = false;
+          if (currentAssistantTurnId == null || json['assistant_turn_id'] == null || json['assistant_turn_id'] == currentAssistantTurnId) {
+            isAIPlayback = false;
+            currentAssistantTurnId = null;
+          }
         } else if (json['event'] == 'tts_reset') {
-          audioPlayService.reset();
-          isAIPlayback = false;
+          if (currentAssistantTurnId == null || json['assistant_turn_id'] == null || json['assistant_turn_id'] == currentAssistantTurnId) {
+            audioPlayService.reset();
+            isAIPlayback = false;
+            currentAssistantTurnId = null;
+          }
         }
         notifyListeners();
       };
 
       webSocketService.onBinaryMessage = (data) {
-        audioPlayService.feedData(data);
+        if (isAIPlayback && currentAssistantTurnId != null) {
+          audioPlayService.feedData(data);
+        }
       };
 
       webSocketService.onClosed = () {
@@ -187,6 +206,7 @@ class AppStateProvider with ChangeNotifier {
     connectionState = VoiceConnectionState.disconnected;
     isRecording = false;
     isAIPlayback = false;
+    currentAssistantTurnId = null;
 
     try {
       await _recordSub?.cancel();
@@ -205,6 +225,7 @@ class AppStateProvider with ChangeNotifier {
     webSocketService.sendInterrupt();
     audioPlayService.reset();
     isAIPlayback = false;
+    currentAssistantTurnId = null;
     notifyListeners();
   }
 

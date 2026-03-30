@@ -8,6 +8,7 @@ import android.media.AudioTrack
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import kotlin.math.min
 import java.util.concurrent.LinkedBlockingQueue
 import kotlin.concurrent.thread
 
@@ -17,6 +18,7 @@ class MainActivity: FlutterActivity() {
     private var audioTrack: AudioTrack? = null
     private var audioQueue = LinkedBlockingQueue<ByteArray>(MAX_AUDIO_QUEUE_SIZE)
     @Volatile private var isPlaying = false
+    @Volatile private var playbackEpoch = 0
     private var playThread: Thread? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -39,12 +41,11 @@ class MainActivity: FlutterActivity() {
                     result.success(null)
                 }
                 "stop" -> {
+                    playbackEpoch += 1
                     audioQueue.clear() // Drop all pending chunks instantly
                     try {
                         audioTrack?.pause()
                         audioTrack?.flush() // Discard unplayed buffer
-                        // Note: We don't release here. We just leave it ready for the next TTS.
-                        audioTrack?.play()
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }
@@ -58,6 +59,8 @@ class MainActivity: FlutterActivity() {
     private fun initAudioTrack(sampleRate: Int) {
         stopAudioTrack()
         audioQueue = LinkedBlockingQueue(MAX_AUDIO_QUEUE_SIZE)
+        val epoch = playbackEpoch + 1
+        playbackEpoch = epoch
         
         // Fix Low Volume: Force VoiceCommunication to use Speakerphone instead of Earpiece
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -69,6 +72,7 @@ class MainActivity: FlutterActivity() {
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT
         )
+        val writeBlockBytes = maxOf(512, (sampleRate / 50) * 2)
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -83,7 +87,7 @@ class MainActivity: FlutterActivity() {
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build()
             )
-            .setBufferSizeInBytes(minBufferSize * 4) // extra buffer for network jitter
+            .setBufferSizeInBytes(minBufferSize * 2)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         
@@ -91,10 +95,21 @@ class MainActivity: FlutterActivity() {
         isPlaying = true
 
         playThread = thread {
-            while (isPlaying) {
+            while (isPlaying && epoch == playbackEpoch) {
                 try {
                     val chunk = audioQueue.take() // Blocks until data is available
-                    audioTrack?.write(chunk, 0, chunk.size)
+                    if (!isPlaying || epoch != playbackEpoch) {
+                        continue
+                    }
+                    var offset = 0
+                    while (offset < chunk.size) {
+                        if (!isPlaying || epoch != playbackEpoch) {
+                            break
+                        }
+                        val length = min(writeBlockBytes, chunk.size - offset)
+                        audioTrack?.write(chunk, offset, length)
+                        offset += length
+                    }
                 } catch (e: InterruptedException) {
                     break
                 } catch (e: Exception) {
@@ -105,6 +120,7 @@ class MainActivity: FlutterActivity() {
     }
 
     private fun stopAudioTrack() {
+        playbackEpoch += 1
         isPlaying = false
         playThread?.interrupt()
         playThread = null

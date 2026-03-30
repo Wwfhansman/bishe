@@ -39,6 +39,11 @@ class DummyStt:
         self.reset_calls += 1
 
 
+class FailingLlm:
+    def chat(self, *_args, **_kwargs):
+        raise RuntimeError("llm_failed")
+
+
 def test_stop_current_tts_resets_state_and_stops_tts():
     loop = asyncio.new_event_loop()
     try:
@@ -48,7 +53,8 @@ def test_stop_current_tts_resets_state_and_stops_tts():
         runner.loop = loop
         runner.tts = DummyTts()
         runner.barge_in.speech_state = SpeechState.SPEAKING
-        runner._enqueue_audio_chunk(b"old-audio")
+        runner._active_assistant_turn_id = 1
+        runner._enqueue_audio_chunk(1, b"old-audio")
 
         runner._stop_current_tts()
         loop.run_until_complete(asyncio.sleep(0))
@@ -86,6 +92,7 @@ def test_confirm_interrupt_marks_interrupted_and_stops_tts():
         runner.loop = loop
         runner.tts = DummyTts()
         runner.barge_in.speech_state = SpeechState.INTERRUPT_PENDING
+        runner._active_assistant_turn_id = 2
 
         runner._confirm_interrupt()
         loop.run_until_complete(asyncio.sleep(0))
@@ -108,6 +115,7 @@ def test_handle_text_command_stop_resets_stt_and_tts():
         runner.tts = DummyTts()
         runner.stt = DummyStt()
         runner.barge_in.speech_state = SpeechState.SPEAKING
+        runner._active_assistant_turn_id = 3
 
         loop.run_until_complete(runner._handle_text_command('{"cmd":"stop"}'))
         loop.run_until_complete(asyncio.sleep(0))
@@ -131,6 +139,7 @@ def test_handle_text_command_interrupt_stops_tts_without_resetting_stt():
         runner.tts = DummyTts()
         runner.stt = DummyStt()
         runner.barge_in.speech_state = SpeechState.SPEAKING
+        runner._active_assistant_turn_id = 4
 
         loop.run_until_complete(runner._handle_text_command('{"cmd":"interrupt"}'))
         loop.run_until_complete(asyncio.sleep(0))
@@ -227,6 +236,43 @@ def test_barge_in_score_is_lower_when_echo_risk_is_high():
     )
 
     assert low_echo > high_echo
+
+
+def test_handle_reply_uses_explicit_fallback_when_llm_fails():
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        websocket = DummyWebSocket()
+        runner = VoiceSessionRunner(websocket=websocket, session_id="session-id")
+        runner.loop = loop
+        runner.llm = FailingLlm()
+
+        spoken = []
+        emitted = []
+
+        def fake_speak(text):
+            spoken.append(text)
+
+        def fake_emit():
+            emitted.append(True)
+
+        async def fake_send(obj):
+            websocket.text_messages.append(obj)
+
+        runner._speak_text = fake_speak
+        runner._emit_perf_metrics = fake_emit
+        runner._send_text_obj = fake_send
+
+        runner._handle_reply("现在做什么")
+        loop.run_until_complete(asyncio.sleep(0))
+
+        assert spoken == ["我刚刚没连上大模型，请再说一遍。"]
+        assert emitted == [True]
+        assert any(msg["event"] == "llm_error" for msg in websocket.text_messages)
+        assert all("现在做什么" not in text for text in spoken)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 def test_handle_barge_in_enters_pending_with_high_adaptive_score():

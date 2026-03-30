@@ -164,7 +164,9 @@ class PiperOnnxTtsService:
                     )
                 except Exception:
                     it = voice.synthesize(t)
-                
+
+                emit_chunk_bytes = int(self._sample_rate * 2 * 40 / 1000)
+                emit_chunk_bytes = max(640, emit_chunk_bytes - (emit_chunk_bytes % 2))
                 chunk_count = 0
                 for b in it:
                     if stop_evt.is_set():
@@ -192,8 +194,14 @@ class PiperOnnxTtsService:
                                 data = None
                         
                         if data:
-                            q.put(data, timeout=1.0)
-                            chunk_count += 1
+                            for offset in range(0, len(data), emit_chunk_bytes):
+                                if stop_evt.is_set():
+                                    break
+                                part = data[offset : offset + emit_chunk_bytes]
+                                if not part:
+                                    continue
+                                q.put(part, timeout=1.0)
+                                chunk_count += 1
                         else:
                             print(f"Piper: Could not extract PCM bytes from {type(b)}")
                     except Exception as e:
@@ -232,4 +240,3 @@ class PiperOnnxTtsService:
             yield TtsChunk(pcm16_bytes=b"", sample_rate=self._sample_rate, is_final=True)
 
         return gen()
-
