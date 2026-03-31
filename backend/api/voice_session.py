@@ -455,6 +455,7 @@ class VoiceSessionRunner:
                     )
                 count = 0
                 interrupted_early = False
+                playback_deadline = time.perf_counter()
                 for chunk in self.tts.synthesize_stream(text):
                     if not self.send_enabled or self._active_assistant_turn_id != turn_id:
                         interrupted_early = True
@@ -470,6 +471,18 @@ class VoiceSessionRunner:
                         if self.perf_tts_first_chunk_ts is None:
                             self.perf_tts_first_chunk_ts = time.perf_counter()
                     self._put_audio(turn_id, data)
+                    chunk_duration_s = len(data) / max(float(self.tts.sample_rate) * 2.0, 1.0)
+                    playback_deadline += chunk_duration_s
+                    while True:
+                        if not self.send_enabled or self._active_assistant_turn_id != turn_id:
+                            interrupted_early = True
+                            break
+                        remain = playback_deadline - time.perf_counter()
+                        if remain <= 0:
+                            break
+                        time.sleep(min(0.01, remain))
+                    if interrupted_early:
+                        break
                     if count % 5 == 0 and self.loop is not None:
                         asyncio.run_coroutine_threadsafe(
                             self._send_text_obj({"event": "tts_chunk", "count": count, "assistant_turn_id": turn_id}),
