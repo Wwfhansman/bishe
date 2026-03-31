@@ -34,9 +34,13 @@ class DummyTts:
 class DummyStt:
     def __init__(self):
         self.reset_calls = 0
+        self.accepted = []
 
     def reset(self):
         self.reset_calls += 1
+
+    def accept_audio(self, chunk):
+        self.accepted.append(chunk)
 
 
 class FailingLlm:
@@ -313,3 +317,23 @@ def test_handle_barge_in_confirms_interrupt_with_strong_signal():
 
     assert runner.barge_in.speech_state == SpeechState.INTERRUPTED
     assert runner.tts.stop_calls == 1
+
+
+def test_start_interrupt_collection_resets_stt_and_seeds_pre_roll():
+    websocket = DummyWebSocket()
+    runner = VoiceSessionRunner(websocket=websocket, session_id="session-id")
+    runner.stt = DummyStt()
+    runner.tts = DummyTts()
+    runner._active_assistant_turn_id = 7
+    runner.barge_in.speech_state = SpeechState.SPEAKING
+    frame = (np.ones(runner.frame_bytes // 2, dtype=np.int16) * 1200).tobytes()
+    runner._append_pre_roll(frame)
+
+    runner._start_interrupt_collection("early_trigger")
+
+    assert runner._interrupt_collecting is True
+    assert runner.stt.reset_calls == 1
+    assert runner.tts.stop_calls == 1
+    assert len(runner.stt.accepted) >= 1
+    assert runner._pre_roll_seeded is True
+    assert runner._skip_direct_stt_once is True

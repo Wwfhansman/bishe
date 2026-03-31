@@ -12,6 +12,8 @@ from ..config import (
     BARGE_IN_ADAPTIVE_ENERGY_MARGIN,
     BARGE_IN_CONFIRM_SCORE,
     BARGE_IN_ECHO_SUPPRESSION_WINDOW_MS,
+    BARGE_IN_EARLY_TRIGGER_ENERGY_SCALE,
+    BARGE_IN_EARLY_TRIGGER_MIN_FRAMES,
     BARGE_IN_ENABLED,
     BARGE_IN_FALLBACK_SENSITIVITY,
     BARGE_IN_FRAME_MS,
@@ -22,6 +24,7 @@ from ..config import (
     BARGE_IN_NOISE_FLOOR,
     BARGE_IN_NOISE_FLOOR_ALPHA,
     BARGE_IN_PENDING_SCORE,
+    BARGE_IN_PRE_ROLL_MS,
     BARGE_IN_PEAK_GATE_MIN,
     BARGE_IN_PEAK_GATE_SCALE,
     BARGE_IN_PEAK_MIN_FRAMES,
@@ -42,6 +45,7 @@ class SpeechState(str, Enum):
 
 
 class BargeInEventKind(str, Enum):
+    EARLY_TRIGGER = "early_trigger"
     PENDING = "pending"
     CONFIRMED = "confirmed"
     RESUMED = "resumed"
@@ -81,6 +85,9 @@ class BargeInState:
     late_window_ms: int = BARGE_IN_LATE_WINDOW_MS
     late_peak_min_frames: int = BARGE_IN_LATE_PEAK_MIN_FRAMES
     late_plateau_limit: int = BARGE_IN_LATE_PLATEAU_LIMIT
+    pre_roll_ms: int = BARGE_IN_PRE_ROLL_MS
+    early_trigger_min_frames: int = BARGE_IN_EARLY_TRIGGER_MIN_FRAMES
+    early_trigger_energy_scale: float = BARGE_IN_EARLY_TRIGGER_ENERGY_SCALE
     speaking_frames: int = 0
     silence_frames: int = 0
     speech_state: SpeechState = SpeechState.IDLE
@@ -95,6 +102,7 @@ class BargeInState:
     peak_run: int = 0
     max_peak_run: int = 0
     pending_tts_elapsed_ms: float | None = None
+    early_triggered: bool = False
 
 
 class AdaptiveBargeInDetector:
@@ -114,6 +122,7 @@ class AdaptiveBargeInDetector:
         self.state.peak_run = 0
         self.state.max_peak_run = 0
         self.state.pending_tts_elapsed_ms = None
+        self.state.early_triggered = False
 
     def frame_energy(self, frame: bytes) -> float:
         samples = np.frombuffer(frame, dtype=np.int16)
@@ -252,6 +261,35 @@ class AdaptiveBargeInDetector:
                     self.state.max_peak_run = max(self.state.max_peak_run, self.state.peak_run)
                 else:
                     self.state.peak_run = 0
+                early_trigger_gate = max(
+                    self.state.noise_floor * self.state.early_trigger_energy_scale,
+                    self.state.noise_floor + 80.0,
+                )
+                if (
+                    self.state.speech_state == SpeechState.SPEAKING
+                    and not self.state.early_triggered
+                    and self.state.speaking_frames >= self.state.early_trigger_min_frames
+                    and is_speech
+                    and energy >= early_trigger_gate
+                    and score >= max(0.35, self.state.pending_score * 0.7)
+                    and speech_ratio >= 0.15
+                ):
+                    self.state.speech_state = SpeechState.INTERRUPT_PENDING
+                    self.state.early_triggered = True
+                    if tts_start_time and tts_start_time > 0:
+                        self.state.pending_tts_elapsed_ms = (current_time - tts_start_time) * 1000.0
+                    else:
+                        self.state.pending_tts_elapsed_ms = None
+                    events.append(
+                        BargeInEvent(
+                            kind=BargeInEventKind.EARLY_TRIGGER,
+                            score=score,
+                            speech_ratio=speech_ratio,
+                            echo_risk=echo_risk,
+                            noise_floor=self.state.noise_floor,
+                            energy=energy,
+                        )
+                    )
                 if (
                     self.state.speech_state == SpeechState.SPEAKING
                     and self.state.speaking_frames >= self.state.start_frames

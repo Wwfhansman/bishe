@@ -16,6 +16,7 @@ except Exception:
 
 from .. import database
 from ..config import (
+    BARGE_IN_PRE_ROLL_MS,
     GREETING_TEXT,
     LLM_SYSTEM_PROMPT,
     RATE as ASR_RATE,
@@ -74,6 +75,11 @@ class VoiceSessionRunner:
         self._suppressed_final: Optional[tuple[str, float]] = None
         self._last_forwarded_asr_final_norm = ""
         self._last_forwarded_asr_final_ts = 0.0
+        self._pre_roll_pcm = bytearray()
+        self._pre_roll_max_bytes = max(0, int(ASR_RATE * 2 * BARGE_IN_PRE_ROLL_MS / 1000))
+        self._interrupt_collecting = False
+        self._pre_roll_seeded = False
+        self._skip_direct_stt_once = False
 
         self.perf_asr_partial_ts: Optional[float] = None
         self.perf_asr_final_ts: Optional[float] = None
@@ -171,6 +177,67 @@ class VoiceSessionRunner:
         self._suppressed_partial = None
         self._suppressed_final = None
 
+    def _reset_interrupt_collection(self) -> None:
+        self._interrupt_collecting = False
+        self._pre_roll_seeded = False
+        self._skip_direct_stt_once = False
+
+    def _append_pre_roll(self, audio_bytes: bytes) -> None:
+        if self._pre_roll_max_bytes <= 0 or not audio_bytes:
+            return
+        self._pre_roll_pcm.extend(audio_bytes)
+        overflow = len(self._pre_roll_pcm) - self._pre_roll_max_bytes
+        if overflow > 0:
+            del self._pre_roll_pcm[:overflow]
+
+    def _get_pre_roll_bytes(self) -> bytes:
+        if not self._pre_roll_pcm:
+            return b""
+        return bytes(self._pre_roll_pcm)
+
+    def _feed_stt_audio(self, audio_bytes: bytes) -> None:
+        if not audio_bytes or self.stt is None:
+            return
+        chunk_bytes = max(self.frame_bytes, 640)
+        for offset in range(0, len(audio_bytes), chunk_bytes):
+            part = audio_bytes[offset : offset + chunk_bytes]
+            if not part:
+                continue
+            self.stt.accept_audio(
+                AudioChunk(pcm16_bytes=part, sample_rate=ASR_RATE, channels=1)
+            )
+
+    def _start_interrupt_collection(self, trigger_kind: str) -> None:
+        if self._interrupt_collecting:
+            return
+        self._interrupt_collecting = True
+        self._pre_roll_seeded = False
+        self._skip_direct_stt_once = True
+        self._reset_suppressed_asr()
+        self._interrupt_now(force=True, hard_stop=True)
+        if self.stt is not None:
+            try:
+                self.stt.reset()
+            except Exception:
+                pass
+            pre_roll = self._get_pre_roll_bytes()
+            if pre_roll:
+                self._feed_stt_audio(pre_roll)
+                self._pre_roll_seeded = True
+        if self.loop is not None:
+            asyncio.run_coroutine_threadsafe(
+                self._send_text_obj(
+                    {
+                        "event": "early_trigger",
+                        "kind": trigger_kind,
+                        "pre_roll_bytes": len(self._pre_roll_pcm),
+                        "assistant_turn_id": self._active_assistant_turn_id,
+                        "ts": time.time(),
+                    }
+                ),
+                self.loop,
+            )
+
     def _begin_assistant_turn(self) -> int:
         self._next_assistant_turn_id += 1
         turn_id = self._next_assistant_turn_id
@@ -178,6 +245,7 @@ class VoiceSessionRunner:
         self.send_enabled = True
         self._reset_turn_start_gate()
         self._reset_suppressed_asr()
+        self._reset_interrupt_collection()
         self.barge_in_detector.reset_runtime(speech_state=SpeechState.SPEAKING)
         self.last_tts_start_time = time.time()
         return turn_id
@@ -196,6 +264,7 @@ class VoiceSessionRunner:
         else:
             self.barge_in_detector.reset_runtime(speech_state=SpeechState.IDLE)
             self._reset_suppressed_asr()
+            self._reset_interrupt_collection()
         return True
 
     def _should_skip_final_text(self, text: str) -> bool:
@@ -210,6 +279,7 @@ class VoiceSessionRunner:
     async def _forward_final_text(self, text: str) -> None:
         if self._should_skip_final_text(text):
             return
+        self._reset_interrupt_collection()
         with self.perf_lock:
             self.perf_asr_final_ts = time.perf_counter()
         await self._send_text_obj({"event": "asr_text", "text": text})
@@ -279,12 +349,18 @@ class VoiceSessionRunner:
     def _confirm_frames_required(self, score: float) -> int:
         return self.barge_in_detector.confirm_frames_required(score)
 
-    def _interrupt_now(self, force: bool = False) -> None:
+    def _interrupt_now(self, force: bool = False, hard_stop: bool = False) -> None:
         if not force and self.barge_in.speech_state != SpeechState.SPEAKING:
             return
         turn_id = self._active_assistant_turn_id
         self.send_enabled = False
         self._clear_out_audio_q()
+        if hard_stop:
+            try:
+                if self.tts is not None:
+                    self.tts.stop()
+            except Exception:
+                pass
         if self.loop is not None:
             asyncio.run_coroutine_threadsafe(
                 self._send_text_obj({"event": "tts_reset", "assistant_turn_id": turn_id}),
@@ -331,6 +407,7 @@ class VoiceSessionRunner:
 
     def _resume_play(self) -> None:
         self.send_enabled = True
+        self._reset_interrupt_collection()
         self.barge_in_detector.reset_runtime(speech_state=SpeechState.SPEAKING)
 
     def _stop_current_tts(self) -> None:
@@ -585,7 +662,7 @@ class VoiceSessionRunner:
                                 self._suppressed_final = (result.text, time.time())
                                 continue
                             if assistant_speaking:
-                                self._interrupt_now(force=True)
+                                self._interrupt_now(force=True, hard_stop=True)
                                 self._confirm_interrupt(force=True)
                             await self._forward_final_text(result.text)
                         else:
@@ -596,7 +673,7 @@ class VoiceSessionRunner:
                                 assistant_speaking
                                 and len(result.text.strip()) >= 2
                             ):
-                                self._interrupt_now(force=True)
+                                self._interrupt_now(force=True, hard_stop=True)
                                 self._confirm_interrupt(force=True)
                             with self.perf_lock:
                                 if self.perf_asr_partial_ts is None:
@@ -639,10 +716,12 @@ class VoiceSessionRunner:
             tts_start_time=self.last_tts_start_time,
         )
         for event in events:
-            if event.kind == BargeInEventKind.PENDING:
+            if event.kind == BargeInEventKind.EARLY_TRIGGER:
+                self._start_interrupt_collection(event.kind.value)
+            elif event.kind == BargeInEventKind.PENDING:
                 continue
             elif event.kind == BargeInEventKind.CONFIRMED:
-                self._interrupt_now(force=True)
+                self._interrupt_now(force=True, hard_stop=True)
                 self._confirm_interrupt(force=True)
             elif event.kind == BargeInEventKind.RESUMED:
                 self._resume_play()
@@ -776,13 +855,17 @@ class VoiceSessionRunner:
                     )
                 if not processed_audio:
                     continue
+                self._append_pre_roll(processed_audio)
                 self._handle_barge_in(processed_audio)
                 try:
                     if self.stt is None:
                         raise RuntimeError("STT not initialized")
-                    self.stt.accept_audio(
-                        AudioChunk(pcm16_bytes=processed_audio, sample_rate=ASR_RATE, channels=1)
-                    )
+                    if self._skip_direct_stt_once:
+                        self._skip_direct_stt_once = False
+                    else:
+                        self.stt.accept_audio(
+                            AudioChunk(pcm16_bytes=processed_audio, sample_rate=ASR_RATE, channels=1)
+                        )
                 except Exception as e:
                     await self._send_text_obj({"event": "error", "stage": "asr_send", "detail": str(e)})
                     break
